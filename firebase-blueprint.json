@@ -1,0 +1,54 @@
+{
+  "entities": {
+    "Barber": {
+      "title": "Barber",
+      "description": "A barber working in the shop",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "status": { "type": "string", "enum": ["available", "working", "unavailable"] },
+        "photoUrl": { "type": "string" },
+        "order": { "type": "number" }
+      },
+      "required": ["id", "name", "status"]
+    },
+    "Booking": {
+      "title": "Booking",
+      "description": "A haircut appointment",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "barberId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "time": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "completed", "missed"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "barberId", "clientName", "time", "status"]
+    },
+    "Settings": {
+      "title": "Settings",
+      "description": "Global shop settings",
+      "type": "object",
+      "properties": {
+        "currentDay": { "type": "string" },
+        "isOpen": { "type": "boolean" }
+      }
+    }
+  },
+  "firestore": {
+    "/barbers/{barberId}": {
+      "schema": "Barber",
+      "description": "Collection of barbers"
+    },
+    "/bookings/{bookingId}": {
+      "schema": "Booking",
+      "description": "Collection of client bookings"
+    },
+    "/settings/global": {
+      "schema": "Settings",
+      "description": "Global configuration"
+    }
+  }
+}
