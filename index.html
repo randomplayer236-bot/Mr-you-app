@@ -6,7 +6,18 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="theme-color" content="#000000" />
-    <title>MR you - Barber Shop</title>
+    <link rel="manifest" id="manifest-link" href="/manifest.json" />
+    <link rel="apple-touch-icon" id="apple-icon" href="https://picsum.photos/id/1071/192/192" />
+    <title>MR you</title>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then(registration => console.log('SW registered:', registration))
+            .catch(error => console.log('SW registration failed:', error));
+        });
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
