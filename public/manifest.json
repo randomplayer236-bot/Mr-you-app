@@ -3,8 +3,10 @@
   "short_name": "MR YOU",
   "description": "Experience the ultimate grooming at MR YOU. Book your haircut, VIP service, or Hammam session instantly with our premium management app.",
   "id": "com.mryou.barberapp",
-  "start_url": "/",
+  "start_url": "/?source=pwa",
+  "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "window-controls-overlay"],
   "background_color": "#000000",
   "theme_color": "#000000",
   "orientation": "portrait",
@@ -14,13 +16,25 @@
       "src": "https://picsum.photos/id/1071/192/192",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "https://picsum.photos/id/1071/192/192",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
     },
     {
       "src": "https://picsum.photos/id/1071/512/512",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "https://picsum.photos/id/1071/512/512",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ],
   "screenshots": [
