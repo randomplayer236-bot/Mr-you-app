@@ -397,11 +397,12 @@ function BarberShop() {
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
 
     // For iOS or if the event doesn't fire, we can show a manual guide after some time
+    // We reduced this to 3 seconds to feel faster
     const timer = setTimeout(() => {
       if (!isStandaloneMode && (isIOSDevice || !deferredPrompt)) {
         setShowInstallButton(true);
       }
-    }, 5000);
+    }, 3000);
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
