@@ -1,11 +1,14 @@
 {
-  "name": "MR YOU",
+  "name": "MR YOU - Premium Barber Shop",
   "short_name": "MR YOU",
-  "description": "Premium Barber Shop management and booking app.",
+  "description": "Experience the ultimate grooming at MR YOU. Book your haircut, VIP service, or Hammam session instantly with our premium management app.",
+  "id": "com.mryou.barberapp",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#000000",
   "theme_color": "#000000",
+  "orientation": "portrait",
+  "categories": ["lifestyle", "business", "utilities"],
   "icons": [
     {
       "src": "https://picsum.photos/id/1071/192/192",
@@ -18,6 +21,22 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "https://picsum.photos/seed/mryou-mobile/720/1280",
+      "sizes": "720x1280",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "MR YOU Booking Screen"
+    },
+    {
+      "src": "https://picsum.photos/seed/mryou-desktop/1920/1080",
+      "sizes": "1920x1080",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "MR YOU Management Dashboard"
     }
   ]
 }
