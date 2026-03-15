@@ -1,9 +1,31 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: barbers
+    // Fields: id, name, status, photoUrl, order, isKicked, activeSessionId, lastActive
+    //
+    // Collection: bookings
+    // Fields: id, barberId, clientName, date, time, dayName, status, createdAt, serviceType, isVip
+    //
+    // Collection: settings
+    // Fields: currentDay, isOpen, logoUrl, vipPhotoUrl, shopPhotos
+    //
+    // Collection: gallery
+    // Fields: id, url, createdAt
+    //
+    // Collection: notifications
+    // Fields: id, message, read, createdAt
+    //
+    // ===============================================================
+
     // Prototype rules: Allow public access for the barber shop demo
     // Since the app uses a custom login system (not Firebase Auth), 
-    // we allow public read/write for all collections.
+    // we allow public read/write for all collections for now.
+    // WARNING: These rules are NOT secure for production.
     
     match /barbers/{barberId} {
       allow read, write: if true;
@@ -22,6 +44,10 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
+      allow read, write: if true;
+    }
+
+    match /gallery/{videoId} {
       allow read, write: if true;
     }
   }

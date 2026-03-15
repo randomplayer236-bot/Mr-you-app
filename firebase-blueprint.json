@@ -35,6 +35,17 @@
         "currentDay": { "type": "string" },
         "isOpen": { "type": "boolean" }
       }
+    },
+    "GalleryVideo": {
+      "title": "GalleryVideo",
+      "description": "A video in the shop gallery",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "url": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "url"]
     }
   },
   "firestore": {
@@ -49,6 +60,10 @@
     "/settings/global": {
       "schema": "Settings",
       "description": "Global configuration"
+    },
+    "/gallery/{videoId}": {
+      "schema": "GalleryVideo",
+      "description": "Collection of gallery videos"
     }
   }
 }

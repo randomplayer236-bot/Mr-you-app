@@ -26,7 +26,9 @@ import {
   Upload,
   Bell,
   X,
-  Star
+  Star,
+  Droplets,
+  Video
 } from 'lucide-react';
 import { 
   collection, 
@@ -41,7 +43,8 @@ import {
   serverTimestamp,
   writeBatch
 } from 'firebase/firestore';
-import { db, auth } from './firebase';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { db, auth, storage } from './firebase';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -113,7 +116,18 @@ type Role = 'admin' | 'manager' | 'worker' | 'client';
 type Status = 'available' | 'working' | 'unavailable';
 type BookingStatus = 'pending' | 'completed' | 'missed';
 
-interface Barber { id: string; name: string; status: Status; photoUrl?: string; order: number; isShop?: boolean; }
+interface Barber { 
+  id: string; 
+  name: string; 
+  status: Status; 
+  photoUrl?: string; 
+  order: number; 
+  isShop?: boolean; 
+  isKicked?: boolean; 
+  activeSessionId?: string;
+  lastActive?: any;
+}
+interface GalleryVideo { id: string; url: string; storagePath?: string; createdAt: any; }
 interface Booking { 
   id: string; 
   barberId: string; 
@@ -125,6 +139,7 @@ interface Booking {
   createdAt: any; 
   notified?: boolean;
   isVip?: boolean;
+  serviceType?: 'haircut' | 'hammam';
 }
 
 interface Notification {
@@ -137,43 +152,82 @@ interface Notification {
 
 const TRANSLATIONS = {
   en: {
-    title: 'MR you', subtitle: 'Premium Barber Shop', available: 'Available', working: 'Working', unavailable: 'Unavailable',
+    title: 'MR YOU', 
+    subtitle: '', 
+    available: 'Available', working: 'Working', unavailable: 'Unavailable',
     bookNow: 'Book Now', clientName: 'Your Name', pickTime: 'Pick Time', pickDate: 'Pick Date', confirm: 'Confirm Booking', cancel: 'Cancel',
     admin: 'Admin', manager: 'Manager', worker: 'Worker', login: 'Login', password: 'Password', clearDay: 'Clear Day',
     workingDays: 'Tuesday - Sunday (10:00 - 22:00)', tenMinRule: 'Note: Max 10 mins late or booking missed.',
     done: 'Done', delete: 'Delete', noBookings: 'No bookings', clientsBefore: 'Clients before you', logout: 'Logout',
-    notifications: 'Notifications', newBooking: 'New booking from', at: 'at', ourHaircuts: 'Our Hair Cuts',
+    notifications: 'Notifications',
+    liveSchedule: 'Live Schedule',
+    allBookingsVisible: 'All bookings are public and visible to everyone.',
+    newBooking: 'New booking from', at: 'at', ourHaircuts: 'Our Hair Cuts',
     days: { Tuesday: 'Tuesday', Wednesday: 'Wednesday', Thursday: 'Thursday', Friday: 'Friday', Saturday: 'Saturday', Sunday: 'Sunday' },
     choosePersonalBarber: 'Choose a personal barber',
     vipSection: 'VIP Section',
     vipBooking: 'VIP Booking',
-    vipDetails: 'Proteins, Hair Dying, and more'
+    vipDetails: 'Proteins, Hair Dying, and more',
+    hammam: 'Hammam',
+    hammamDetails: 'Soaps, professional cleaning, towels, and all you need.',
+    kick: 'Kick',
+    unban: 'Unban',
+    unbannedSection: 'Unbanned Section',
+    gallery: 'Gallery',
+    uploadVideo: 'Upload Video',
+    kickedMessage: 'You have been kicked from the shop. Access denied.'
   },
   fr: {
-    title: 'MR you', subtitle: 'Barbier de Prestige', available: 'Disponible', working: 'En cours', unavailable: 'Indisponible',
+    title: 'MR YOU', 
+    subtitle: '', 
+    available: 'Disponible', working: 'En cours', unavailable: 'Indisponible',
     bookNow: 'Réserver', clientName: 'Votre Nom', pickTime: 'Choisir l\'heure', pickDate: 'Choisir la date', confirm: 'Confirmer', cancel: 'Annuler',
     admin: 'Admin', manager: 'Gérant', worker: 'Coiffeur', login: 'Connexion', password: 'Mot de passe', clearDay: 'Effacer',
     workingDays: 'Mardi - Dimanche (10:00 - 22:00)', tenMinRule: 'Note: Max 10 min de retard ou annulé.',
     done: 'Terminé', delete: 'Supprimer', noBookings: 'Aucune réservation', clientsBefore: 'Clients avant vous', logout: 'Déconnexion',
-    notifications: 'Notifications', newBooking: 'Nouvelle réservation de', at: 'à', ourHaircuts: 'Nos Coupes',
+    notifications: 'Notifications',
+    liveSchedule: 'Planning en direct',
+    allBookingsVisible: 'Toutes les réservations sont publiques et visibles par tous.',
+    newBooking: 'Nouvelle réservation de', at: 'à', ourHaircuts: 'Nos Coupes',
     days: { Tuesday: 'Mardi', Wednesday: 'Mercredi', Thursday: 'Jeudi', Friday: 'Vendredi', Saturday: 'Samedi', Sunday: 'Dimanche' },
     choosePersonalBarber: 'Choisir un coiffeur personnel',
     vipSection: 'Section VIP',
     vipBooking: 'Réservation VIP',
-    vipDetails: 'Protéines, Teinture, et plus'
+    vipDetails: 'Protéines, Teinture, et plus',
+    hammam: 'Hammam',
+    hammamDetails: 'Savons, nettoyage professionnel, serviettes et tout ce dont vous avez besoin.',
+    kick: 'Renvoyer',
+    unban: 'Réintégrer',
+    unbannedSection: 'Section des bannis',
+    gallery: 'Galerie',
+    uploadVideo: 'Télécharger Vidéo',
+    kickedMessage: 'Vous avez été renvoyé du salon. Accès refusé.'
   },
   ar: {
-    title: 'MR you', subtitle: 'صالون حلاقة فاخر', available: 'متاح', working: 'يعمل', unavailable: 'غير متاح',
+    title: 'MR YOU', 
+    subtitle: '', 
+    available: 'متاح', working: 'يعمل', unavailable: 'غير متاح',
     bookNow: 'احجز الآن', clientName: 'اسمك', pickTime: 'اختر الوقت', pickDate: 'اختر التاريخ', confirm: 'تأكيد الحجز', cancel: 'إلغاء',
     admin: 'مسؤول', manager: 'مدير', worker: 'حلاق', login: 'تسجيل الدخول', password: 'كلمة المرور', clearDay: 'مسح اليوم',
     workingDays: 'الثلاثاء - الأحد (10:00 - 22:00)', tenMinRule: 'ملاحظة: 10 دقائق كحد أقصى للوصول.',
     done: 'تم', delete: 'حذف', noBookings: 'لا يوجد حجوزات', clientsBefore: 'عملاء قبلك', logout: 'تسجيل الخروج',
-    notifications: 'الإشعارات', newBooking: 'حجز جديد من', at: 'في', ourHaircuts: 'قصاتنا',
+    notifications: 'الإشعارات',
+    liveSchedule: 'الجدول المباشر',
+    allBookingsVisible: 'جميع الحجوزات عامة ومرئية للجميع.',
+    newBooking: 'حجز جديد من', at: 'في', ourHaircuts: 'قصاتنا',
     days: { Tuesday: 'الثلاثاء', Wednesday: 'الأربعاء', Thursday: 'الخميس', Friday: 'الجمعة', Saturday: 'السبت', Sunday: 'الأحد' },
     choosePersonalBarber: 'اختر حلاقك الشخصي',
     vipSection: 'قسم VIP',
     vipBooking: 'حجز VIP',
-    vipDetails: 'بروتينات، صبغة شعر، والمزيد'
+    vipDetails: 'بروتينات، صبغة شعر، والمزيد',
+    hammam: 'حمام',
+    hammamDetails: 'صابون، تنظيف احترافي، مناشف وكل ما تحتاجه.',
+    kick: 'طرد',
+    unban: 'إلغاء الحظر',
+    unbannedSection: 'قسم المحظورين',
+    gallery: 'المعرض',
+    uploadVideo: 'رفع فيديو',
+    kickedMessage: 'لقد تم طردك من المحل. تم رفض الوصول.'
   }
 };
 
@@ -184,12 +238,14 @@ function BarberShop() {
   const [barbers, setBarbers] = useState<Barber[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [settings, setSettings] = useState({ currentDay: 'Thursday', logoUrl: '', shopPhotos: ['', '', ''], vipPhotoUrl: '' });
+  const [galleryVideos, setGalleryVideos] = useState<GalleryVideo[]>([]);
+  const [sessionId] = useState(() => Math.random().toString(36).substring(7));
   const [showWorkers, setShowWorkers] = useState(false);
   const [showPersonalBarbers, setShowPersonalBarbers] = useState(false);
   const [isVipBooking, setIsVipBooking] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
   const [loginForm, setLoginForm] = useState({ name: '', password: '' });
-  const [bookingModal, setBookingModal] = useState<{ barberId: string } | null>(null);
+  const [bookingModal, setBookingModal] = useState<{ barberId: string; serviceType?: 'haircut' | 'hammam' } | null>(null);
   const [confirmModal, setConfirmModal] = useState<{ message: string; onConfirm: () => void } | null>(null);
   const [alertModal, setAlertModal] = useState<string | null>(null);
   const [clientName, setClientName] = useState('');
@@ -245,22 +301,18 @@ function BarberShop() {
           vipPhotoUrl: data.vipPhotoUrl || ''
         });
         
-        // Update favicon and PWA icons if logo exists
         if (data.logoUrl) {
-          // Update Favicon
           const link = document.querySelector("link[rel~='icon']") || document.createElement('link');
           (link as HTMLLinkElement).rel = 'icon';
           (link as HTMLLinkElement).href = data.logoUrl;
           document.getElementsByTagName('head')[0].appendChild(link);
 
-          // Update Apple Touch Icon
           const appleIcon = document.getElementById('apple-icon');
           if (appleIcon) appleIcon.setAttribute('href', data.logoUrl);
 
-          // Update PWA Manifest dynamically
           const manifest = {
-            "name": "MR you",
-            "short_name": "MR you",
+            "name": "MR YOU",
+            "short_name": "MR YOU",
             "description": "Premium Barber Shop management and booking app.",
             "start_url": "/",
             "display": "standalone",
@@ -271,8 +323,7 @@ function BarberShop() {
               { "src": data.logoUrl, "sizes": "512x512", "type": "image/png" }
             ]
           };
-          const stringManifest = JSON.stringify(manifest);
-          const blob = new Blob([stringManifest], {type: 'application/json'});
+          const blob = new Blob([JSON.stringify(manifest)], {type: 'application/json'});
           const manifestURL = URL.createObjectURL(blob);
           const manifestLink = document.getElementById('manifest-link');
           if (manifestLink) manifestLink.setAttribute('href', manifestURL);
@@ -283,7 +334,12 @@ function BarberShop() {
       }
     }, (e) => handleFirestoreError(e, OperationType.GET, 'settings/global'));
 
-    return () => { unsubB(); unsubBk(); unsubN(); unsubS(); };
+    const qG = query(collection(db, 'gallery'), orderBy('createdAt', 'desc'));
+    const unsubG = onSnapshot(qG, (snap) => {
+      setGalleryVideos(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as GalleryVideo)));
+    }, (e) => handleFirestoreError(e, OperationType.GET, 'gallery'));
+
+    return () => { unsubB(); unsubBk(); unsubN(); unsubS(); unsubG(); };
   }, []);
 
   useEffect(() => {
@@ -304,7 +360,35 @@ function BarberShop() {
     return () => clearInterval(interval);
   }, [bookings]);
 
-  const handleLogin = (e: React.FormEvent) => {
+  useEffect(() => {
+    if (userRole === 'worker' && workerId) {
+      const worker = barbers.find(b => b.id === workerId);
+      if (worker?.isKicked) {
+        setUserRole('client');
+        setWorkerId(null);
+        setAlertModal(t.kickedMessage);
+        return;
+      }
+      
+      // Session check removed as per user request
+    }
+  }, [barbers, userRole, workerId, sessionId, t.kickedMessage]);
+
+  // Heartbeat for workers
+  useEffect(() => {
+    if (userRole === 'worker' && workerId) {
+      const interval = setInterval(async () => {
+        try {
+          await updateDoc(doc(db, 'barbers', workerId), { 
+            lastActive: serverTimestamp()
+          });
+        } catch (e) {}
+      }, 15000);
+      return () => clearInterval(interval);
+    }
+  }, [userRole, workerId, sessionId]);
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     const { name, password } = loginForm;
     if (name === 'sam' && password === 'sam2006') { setUserRole('admin'); setShowLogin(false); }
@@ -312,9 +396,22 @@ function BarberShop() {
     else if (name === 'worker' && password.startsWith('worker')) {
       const num = parseInt(password.replace('worker', ''));
       if (num >= 1 && num <= 8) {
-        setUserRole('worker');
-        setWorkerId(barbers.find(b => b.order === num)?.id || null);
-        setShowLogin(false);
+        const barber = barbers.find(b => b.order === num);
+        if (barber?.isKicked) {
+          setAlertModal(t.kickedMessage);
+          return;
+        }
+
+        try {
+          await updateDoc(doc(db, 'barbers', barber!.id), { 
+            lastActive: serverTimestamp()
+          });
+          setUserRole('worker');
+          setWorkerId(barber?.id || null);
+          setShowLogin(false);
+        } catch (e) {
+          handleFirestoreError(e, OperationType.UPDATE, `barbers/${barber?.id}`);
+        }
       }
     } else { setAlertModal('Invalid credentials'); }
   };
@@ -341,13 +438,14 @@ function BarberShop() {
         dayName,
         status: 'pending', 
         createdAt: serverTimestamp(),
-        isVip: isVipBooking
+        isVip: isVipBooking,
+        serviceType: bookingModal.serviceType || 'haircut'
       });
       
       // Create notification
       await addDoc(collection(db, 'notifications'), {
         barberId: bookingModal.barberId,
-        message: `${isVipBooking ? '[VIP] ' : ''}${t.newBooking} ${clientName} ${t.at} ${bookingTime} (${dayName} ${bookingDate})`,
+        message: `${isVipBooking ? '[VIP] ' : ''}${bookingModal.serviceType === 'hammam' ? '[HAMMAM] ' : ''}${t.newBooking} ${clientName} ${t.at} ${bookingTime} (${dayName} ${bookingDate})`,
         createdAt: serverTimestamp(),
         read: false
       });
@@ -515,6 +613,70 @@ function BarberShop() {
     });
   };
 
+  const kickBarber = async (id: string) => {
+    setConfirmModal({
+      message: 'Are you sure you want to kick this barber? They will lose access to the app.',
+      onConfirm: async () => {
+        try { await updateDoc(doc(db, 'barbers', id), { isKicked: true }); }
+        catch (e) { handleFirestoreError(e, OperationType.UPDATE, `barbers/${id}`); }
+      }
+    });
+  };
+
+  const unbanBarber = async (id: string) => {
+    try { await updateDoc(doc(db, 'barbers', id), { isKicked: false }); }
+    catch (e) { handleFirestoreError(e, OperationType.UPDATE, `barbers/${id}`); }
+  };
+
+  const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    if (!file.type.startsWith('video/')) {
+      setAlertModal('Please upload a video file');
+      return;
+    }
+
+    if (file.size > 1000 * 1024 * 1024) { // 1000MB limit
+      setAlertModal('Video must be smaller than 1000MB.');
+      return;
+    }
+
+    setAlertModal('Uploading video... Please wait.');
+    
+    try {
+      const storageRef = ref(storage, `gallery/${Date.now()}_${file.name}`);
+      const snapshot = await uploadBytes(storageRef, file);
+      const downloadURL = await getDownloadURL(snapshot.ref);
+      
+      await addDoc(collection(db, 'gallery'), {
+        url: downloadURL,
+        storagePath: storageRef.fullPath,
+        createdAt: serverTimestamp()
+      });
+      setAlertModal('Video uploaded successfully!');
+    } catch (err) {
+      console.error(err);
+      setAlertModal('Upload failed. Please check your connection and try again.');
+    }
+  };
+
+  const deleteVideo = async (id: string) => {
+    const video = galleryVideos.find(v => v.id === id);
+    setConfirmModal({
+      message: 'Delete this video?',
+      onConfirm: async () => {
+        try {
+          if (video?.storagePath) {
+            const storageRef = ref(storage, video.storagePath);
+            await deleteObject(storageRef).catch(e => console.error('Storage delete failed:', e));
+          }
+          await deleteDoc(doc(db, 'gallery', id));
+        } catch (e) { handleFirestoreError(e, OperationType.DELETE, `gallery/${id}`); }
+      }
+    });
+  };
+
   const clearNotifications = async () => {
     setConfirmModal({
       message: 'Clear all notifications?',
@@ -537,7 +699,13 @@ function BarberShop() {
   }, [barbers, userRole, workerId]);
 
   const shopMain = useMemo(() => barbers.find(b => b.isShop), [barbers]);
-  const workers = useMemo(() => barbers.filter(b => !b.isShop), [barbers]);
+  const workers = useMemo(() => {
+    const filtered = barbers.filter(b => !b.isShop);
+    if (userRole === 'worker' && workerId) {
+      return filtered.filter(b => b.id === workerId);
+    }
+    return filtered;
+  }, [barbers, userRole, workerId]);
 
   const visibleNotifications = useMemo(() => {
     return notifications.filter(n => {
@@ -608,7 +776,6 @@ function BarberShop() {
             </motion.div>
             <div className="min-w-0">
               <h1 className="text-xl sm:text-3xl font-serif italic tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-gold-200 via-gold-400 to-gold-200 leading-none mb-0.5 sm:mb-1 truncate">{t.title}</h1>
-              <p className="text-[8px] sm:text-[10px] uppercase tracking-[0.2em] sm:tracking-[0.4em] text-gold-500/60 font-black truncate">{t.subtitle}</p>
             </div>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
@@ -673,13 +840,7 @@ function BarberShop() {
               </div>
             )}
             {userRole !== 'client' && (
-              <motion.button 
-                whileTap={{ scale: 0.95 }}
-                onClick={() => { setUserRole('client'); setWorkerId(null); }} 
-                className="px-6 py-2.5 bg-red-600/10 text-red-400 rounded-full border border-red-600/20 text-[10px] font-black uppercase tracking-widest hover:bg-red-600/20 transition-all"
-              >
-                {t.logout}
-              </motion.button>
+              <div className="w-8" /> // Spacer for notifications
             )}
           </div>
         </div>
@@ -708,9 +869,6 @@ function BarberShop() {
                 {t.title}
               </h2>
               <div className="w-32 h-1 bg-gold-500 mx-auto mb-8 rounded-full shadow-lg shadow-gold-500/50" />
-              <p className="text-sm sm:text-xl text-white/80 max-w-2xl mx-auto font-light tracking-wide leading-relaxed">
-                Experience the art of grooming in our premium studio. Excellence in every cut, precision in every detail.
-              </p>
             </motion.div>
           </div>
         </motion.section>
@@ -736,49 +894,67 @@ function BarberShop() {
             className="mb-24"
           >
             <div className={cn(
-              "bg-black border border-gold-500/20 rounded-[4rem] p-8 sm:p-16 relative transition-all mx-auto max-w-5xl",
+              "bg-black border border-gold-500/20 rounded-[2rem] sm:rounded-[4rem] p-6 sm:p-16 relative transition-all mx-auto max-w-5xl",
               "hover:border-gold-500/40 shadow-[0_0_100px_rgba(212,175,55,0.05)]"
             )}>
-              <div className="flex flex-col lg:flex-row gap-16 items-center lg:items-start">
+              <div className="flex flex-col lg:flex-row gap-12 sm:gap-16 items-center lg:items-start">
                 <div className="flex-1 w-full">
-                  <h2 className="text-6xl sm:text-8xl font-serif italic mb-2 bg-clip-text text-transparent bg-gradient-to-b from-gold-200 via-gold-400 to-gold-600 tracking-tight text-center lg:text-left">{shopMain.name}</h2>
-                  <p className="text-xs sm:text-sm uppercase tracking-[0.6em] text-gold-500/40 font-black mb-12 text-center lg:text-left">{t.subtitle}</p>
+                  <h2 className="text-5xl sm:text-8xl font-serif italic mb-2 bg-clip-text text-transparent bg-gradient-to-b from-gold-200 via-gold-400 to-gold-600 tracking-tight text-center lg:text-left">{shopMain.name}</h2>
                   
                   {/* Shop Photos */}
                   <div className="mb-12">
-                    <div className="flex flex-col sm:flex-row items-center justify-between gap-6 mb-6">
+                    <div className="flex flex-col xl:flex-row items-center justify-between gap-4 sm:gap-6 mb-6">
                       <h3 className="text-[11px] uppercase tracking-[0.3em] text-gold-500/60 font-black flex items-center gap-3">
                         <div className="w-8 h-[1px] bg-gold-500/30" />
                         {t.ourHaircuts}
                         <div className="w-8 h-[1px] bg-gold-500/30" />
                       </h3>
                       
-                      {/* VIP Section */}
-                      <div className="flex items-center gap-4 bg-gold-500/5 p-3 rounded-2xl border border-gold-500/10">
-                        <div className="relative group/vip w-10 h-10 bg-black rounded-lg border border-gold-500/20 overflow-hidden shrink-0">
-                          {settings.vipPhotoUrl ? (
-                            <img src={settings.vipPhotoUrl} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center">
-                              <Star className="text-gold-500/20" size={16} />
-                            </div>
-                          )}
-                          {(userRole === 'admin' || userRole === 'manager') && (
-                            <div className="absolute inset-0 bg-black/80 opacity-0 group-hover/vip:opacity-100 flex items-center justify-center transition-opacity gap-1">
-                              <label className="cursor-pointer p-1 hover:text-gold-400">
-                                <Upload size={12} /><input type="file" accept="image/*" className="hidden" onChange={handleVipPhoto} />
-                              </label>
-                              {settings.vipPhotoUrl && (
-                                <button onClick={deleteVipPhoto} className="p-1 hover:text-red-400">
-                                  <Trash2 size={12} />
-                                </button>
-                              )}
-                            </div>
-                          )}
+                      <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
+                        {/* VIP Section */}
+                        <div className="flex items-center gap-4 bg-gold-500/5 p-3 rounded-2xl border border-gold-500/10 flex-1 sm:flex-none">
+                          <div className="relative group/vip w-10 h-10 bg-black rounded-lg border border-gold-500/20 overflow-hidden shrink-0">
+                            {settings.vipPhotoUrl ? (
+                              <img src={settings.vipPhotoUrl} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center">
+                                <Star className="text-gold-500/20" size={16} />
+                              </div>
+                            )}
+                            {(userRole === 'admin' || userRole === 'manager') && (
+                              <div className="absolute inset-0 bg-black/80 opacity-0 group-hover/vip:opacity-100 flex items-center justify-center transition-opacity gap-1">
+                                <label className="cursor-pointer p-1 hover:text-gold-400">
+                                  <Upload size={12} /><input type="file" accept="image/*" className="hidden" onChange={handleVipPhoto} />
+                                </label>
+                                {settings.vipPhotoUrl && (
+                                  <button onClick={deleteVipPhoto} className="p-1 hover:text-red-400">
+                                    <Trash2 size={12} />
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-gold-500">{t.vipSection}</p>
+                            <p className="text-[8px] text-white/40 uppercase tracking-tighter font-bold">{t.vipDetails}</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-[10px] font-black uppercase tracking-widest text-gold-500">{t.vipSection}</p>
-                          <p className="text-[8px] text-white/40 uppercase tracking-tighter font-bold">{t.vipDetails}</p>
+
+                        {/* Hammam Section */}
+                        <div className="flex items-center gap-4 bg-blue-500/5 p-3 rounded-2xl border border-blue-500/10 flex-1 sm:flex-none">
+                          <div className="w-10 h-10 bg-black rounded-lg border border-blue-500/20 flex items-center justify-center shrink-0">
+                            <Droplets className="text-blue-500/40" size={20} />
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-blue-500">{t.hammam}</p>
+                            <p className="text-[8px] text-white/40 uppercase tracking-tighter font-bold">{t.hammamDetails}</p>
+                          </div>
+                          <button 
+                            onClick={() => setBookingModal({ barberId: shopMain.id, serviceType: 'hammam' })}
+                            className="ml-auto px-3 py-1.5 bg-blue-500 text-white rounded-lg text-[8px] font-black uppercase tracking-widest hover:bg-blue-400 transition-all"
+                          >
+                            {t.bookNow}
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -811,9 +987,143 @@ function BarberShop() {
                         </motion.div>
                       ))}
                     </div>
+
+                    {/* Gallery Section */}
+                    <div className="mt-12">
+                      <div className="flex items-center justify-between mb-6">
+                        <h3 className="text-xl font-black uppercase tracking-widest text-gold-500">{t.gallery}</h3>
+                        {(userRole === 'admin' || userRole === 'manager') && (
+                          <label className="cursor-pointer flex items-center gap-2 px-4 py-2 bg-gold-500 text-black rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all">
+                            <Video size={16} />
+                            {t.uploadVideo}
+                            <input type="file" accept="video/*" className="hidden" onChange={handleVideoUpload} />
+                          </label>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                        {galleryVideos.map((video) => (
+                          <div key={video.id} className="aspect-[9/16] bg-white/5 rounded-2xl border border-white/10 overflow-hidden relative group/video shadow-xl">
+                            <video 
+                              src={video.url} 
+                              className="w-full h-full object-cover" 
+                              loop 
+                              muted 
+                              playsInline 
+                              controls
+                              onMouseOver={e => e.currentTarget.play()} 
+                              onMouseOut={e => e.currentTarget.pause()} 
+                            />
+                            {(userRole === 'admin' || userRole === 'manager') && (
+                              <button 
+                                onClick={() => deleteVideo(video.id)}
+                                className="absolute top-2 right-2 p-2 bg-red-600 text-white rounded-full z-10"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Planning en direct (Live Schedule) */}
+                    <div className="mt-16">
+                      <div className="flex items-center justify-between mb-8">
+                        <div>
+                          <h3 className="text-3xl font-serif italic text-gold-200">{t.liveSchedule}</h3>
+                          <p className="text-[10px] uppercase tracking-widest text-gold-500/40 mt-1">{t.allBookingsVisible}</p>
+                        </div>
+                        <div className="flex items-center gap-2 px-4 py-2 bg-gold-500/5 border border-gold-500/20 rounded-xl">
+                          <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                          <span className="text-[10px] font-black uppercase tracking-widest text-emerald-500">Live</span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-4 max-h-[500px] overflow-y-auto pr-4 custom-scrollbar">
+                        {bookings
+                          .filter(b => {
+                            const isToday = b.date === format(new Date(), 'yyyy-MM-dd');
+                            const isCurrentDay = b.dayName === settings.currentDay || (!b.dayName && format(parseISO(b.date), 'EEEE') === settings.currentDay);
+                            return isToday || isCurrentDay;
+                          })
+                          .sort((a, b) => a.time.localeCompare(b.time))
+                          .map((b, i) => {
+                            const barber = barbers.find(bar => bar.id === b.barberId);
+                            return (
+                              <motion.div
+                                key={b.id}
+                                initial={{ opacity: 0, x: -20 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                transition={{ delay: i * 0.05 }}
+                                className="bg-white/5 border border-white/10 rounded-2xl p-5 flex items-center justify-between group hover:border-gold-500/30 transition-all"
+                              >
+                                <div className="flex items-center gap-5">
+                                  <span className="text-xs font-black text-gold-500/30 w-6">{String(i + 1).padStart(2, '0')}</span>
+                                  <div className="w-12 h-12 bg-gold-500/10 rounded-2xl flex items-center justify-center border border-gold-500/20 group-hover:bg-gold-500/20 transition-all">
+                                    <Clock size={20} className="text-gold-500" />
+                                  </div>
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <p className="text-base font-black text-white/90">{b.clientName}</p>
+                                      {b.isVip && (
+                                        <span className="px-2 py-0.5 bg-gold-500 text-black text-[8px] font-black uppercase rounded-md shadow-lg shadow-gold-500/20">VIP</span>
+                                      )}
+                                      {b.serviceType === 'hammam' && (
+                                        <span className="px-2 py-0.5 bg-blue-500 text-white text-[8px] font-black uppercase rounded-md shadow-lg shadow-blue-500/20">HAMMAM</span>
+                                      )}
+                                    </div>
+                                    <p className="text-[11px] text-gold-500/60 font-bold uppercase tracking-widest">{b.time} • {b.date}</p>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-4">
+                                  <div className="text-right">
+                                    <p className="text-[9px] text-white/20 uppercase font-black tracking-tighter mb-1">Barber</p>
+                                    <p className="text-xs text-gold-200 font-bold italic">{barber?.name || 'MR YOU'}</p>
+                                  </div>
+                                  <div className="flex items-center gap-2 border-l border-white/10 pl-4 ml-2">
+                                    {b.status === 'completed' ? (
+                                      <CheckCircle2 size={22} className="text-emerald-400" />
+                                    ) : b.status === 'missed' ? (
+                                      <XCircle size={22} className="text-red-400" />
+                                    ) : (userRole !== 'client') && (
+                                      <div className="flex items-center gap-2">
+                                        <motion.button 
+                                          whileTap={{ scale: 0.9 }} 
+                                          onClick={() => completeBooking(b.id)} 
+                                          className="p-2 bg-emerald-500/10 text-emerald-400 rounded-xl hover:bg-emerald-500/20 transition-colors border border-emerald-500/20" 
+                                          title="Complete"
+                                        >
+                                          <CheckCircle2 size={18} />
+                                        </motion.button>
+                                        <motion.button 
+                                          whileTap={{ scale: 0.9 }} 
+                                          onClick={() => markAsMissed(b.id)} 
+                                          className="p-2 bg-red-500/10 text-red-400 rounded-xl hover:bg-red-500/20 transition-colors border border-red-500/20" 
+                                          title="Mark as Missed/Late"
+                                        >
+                                          <X size={18} />
+                                        </motion.button>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </motion.div>
+                            );
+                          })}
+                        {bookings.filter(b => {
+                            const isToday = b.date === format(new Date(), 'yyyy-MM-dd');
+                            const isCurrentDay = b.dayName === settings.currentDay || (!b.dayName && format(parseISO(b.date), 'EEEE') === settings.currentDay);
+                            return isToday || isCurrentDay;
+                          }).length === 0 && (
+                          <div className="py-16 bg-white/5 border border-dashed border-white/10 rounded-3xl text-center">
+                            <p className="text-xs text-white/20 uppercase font-black tracking-widest">No active bookings for today</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="space-y-4 mb-12 max-h-80 overflow-y-auto pr-4 custom-scrollbar">
+                  <div className="space-y-4 mb-12 max-h-80 overflow-y-auto pr-4 custom-scrollbar hidden">
                     {bookings
                       .filter(b => b.barberId === shopMain.id && (b.dayName === settings.currentDay || (!b.dayName && format(parseISO(b.date), 'EEEE') === settings.currentDay)))
                       .map((b, i) => {
@@ -906,7 +1216,7 @@ function BarberShop() {
                 exit={{ opacity: 0, y: -20 }}
                 className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8"
               >
-                {workers.map((barber, idx) => (
+                {workers.filter(b => !b.isKicked).map((barber, idx) => (
                   <motion.div 
                     key={barber.id} 
                     initial={{ opacity: 0, y: 20 }}
@@ -914,7 +1224,15 @@ function BarberShop() {
                     transition={{ delay: idx * 0.1 }}
                     className="bg-black border border-gold-500/10 rounded-[3rem] p-8 relative hover:border-gold-500/40 transition-all group shadow-2xl"
                   >
-                    <div className="absolute top-8 right-8">
+                    <div className="absolute top-8 right-8 flex items-center gap-2">
+                      {(userRole === 'admin' || userRole === 'manager') && (
+                        <button 
+                          onClick={() => kickBarber(barber.id)}
+                          className="px-3 py-1 bg-red-600 text-white rounded-full text-[9px] font-black uppercase border border-red-500/20 hover:bg-red-500 transition-all"
+                        >
+                          {t.kick}
+                        </button>
+                      )}
                       <div className={cn("px-3 py-1 rounded-full text-[9px] font-black uppercase border flex items-center gap-2 backdrop-blur-sm", barber.status === 'available' ? "text-emerald-400 border-emerald-500/20 bg-emerald-500/5" : barber.status === 'working' ? "text-red-400 border-red-500/20 bg-red-500/5" : "text-white/40 border-white/10 bg-white/5")}>
                         <div className={cn("w-1.5 h-1.5 rounded-full", barber.status === 'available' ? "bg-emerald-400 animate-pulse" : barber.status === 'working' ? "bg-red-400" : "bg-white/40")} />
                         {t[barber.status]}
@@ -922,7 +1240,7 @@ function BarberShop() {
                     </div>
                     <div className="relative w-24 h-24 bg-gold-500/5 rounded-3xl mb-8 flex items-center justify-center border border-gold-500/20 overflow-hidden group/photo shadow-xl">
                       {barber.photoUrl ? <img src={barber.photoUrl} className="w-full h-full object-cover transition-transform duration-500 group-hover/photo:scale-110" referrerPolicy="no-referrer" /> : <User className="text-gold-500/10" size={40} />}
-                      {userRole === 'admin' && (
+                      {(userRole === 'admin' || userRole === 'manager') && (
                         <div className="absolute inset-0 bg-black/80 opacity-0 group-hover/photo:opacity-100 flex items-center justify-center transition-all duration-300 gap-3 backdrop-blur-sm">
                           <label className="cursor-pointer p-2 bg-gold-500 text-black rounded-full hover:scale-110 transition-transform">
                             <Camera size={18} /><input type="file" accept="image/*" className="hidden" onChange={(e) => handlePhoto(barber.id, e)} />
@@ -953,7 +1271,12 @@ function BarberShop() {
                             <div className="flex items-center gap-3">
                               <span className="text-[10px] font-black text-gold-500/30">{String(i + 1).padStart(2, '0')}</span>
                               <div>
-                                <p className="text-[11px] font-black tracking-wide">{b.clientName}</p>
+                                <p className="text-[11px] font-black tracking-wide">
+                                  {b.clientName}
+                                  {b.serviceType === 'hammam' && (
+                                    <span className="ml-2 px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded text-[7px] uppercase font-black">Hammam</span>
+                                  )}
+                                </p>
                                 <p className="text-[9px] text-white/40 font-bold uppercase tracking-widest mt-0.5">{b.time}</p>
                               </div>
                             </div>
@@ -997,8 +1320,40 @@ function BarberShop() {
               </motion.div>
             )}
           </AnimatePresence>
+
+          {/* Unbanned Section */}
+          {(userRole === 'admin' || userRole === 'manager') && workers.some(b => b.isKicked) && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="mt-24 pt-12 border-t border-white/5"
+            >
+              <h3 className="text-2xl font-serif italic text-gold-500 mb-8">{t.unbannedSection}</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                {workers.filter(b => b.isKicked).map(barber => (
+                  <div key={barber.id} className="bg-white/5 border border-white/10 rounded-3xl p-6 flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-white/5 rounded-xl overflow-hidden border border-white/10">
+                        {barber.photoUrl ? <img src={barber.photoUrl} className="w-full h-full object-cover" /> : <User className="text-white/10 m-auto" size={24} />}
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-white/80">{barber.name}</p>
+                        <p className="text-[10px] text-red-400 uppercase font-black tracking-widest">Kicked</p>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => unbanBarber(barber.id)}
+                      className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-500 transition-all"
+                    >
+                      {t.unban}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
         </div>
-  </main>
+      </main>
 
       {(userRole === 'admin' || userRole === 'manager') && (
         <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-50">
@@ -1015,6 +1370,17 @@ function BarberShop() {
       )}
 
       <footer className="max-w-7xl mx-auto px-4 py-20 border-t border-gold-500/10 mt-20">
+        <div className="flex flex-col items-center gap-12 mb-12">
+          {userRole !== 'client' && (
+            <motion.button 
+              whileTap={{ scale: 0.95 }}
+              onClick={() => { setUserRole('client'); setWorkerId(null); }} 
+              className="px-12 py-4 bg-red-600/10 text-red-400 rounded-full border border-red-600/20 text-xs font-black uppercase tracking-[0.3em] hover:bg-red-600/20 transition-all shadow-xl"
+            >
+              {t.logout}
+            </motion.button>
+          )}
+        </div>
         <div className="flex flex-col md:flex-row justify-between items-center gap-12">
           <div className="text-center md:text-left">
             <h3 
@@ -1023,7 +1389,6 @@ function BarberShop() {
             >
               {t.title}
             </h3>
-            <p className="text-[10px] uppercase tracking-[0.5em] text-gold-500/40 font-black">{t.subtitle}</p>
           </div>
           <div className="flex gap-8">
             <a href="https://www.instagram.com/mryou.spa?utm_source=ig_web_button_share_sheet&igsh=ZDNlZDc0MzIxNw==" target="_blank" rel="noopener noreferrer" className="text-[10px] font-black uppercase tracking-widest text-white/20 hover:text-gold-500 transition-colors">Instagram</a>
