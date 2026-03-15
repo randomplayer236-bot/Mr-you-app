@@ -248,6 +248,8 @@ function BarberShop() {
   const [bookingModal, setBookingModal] = useState<{ barberId: string; serviceType?: 'haircut' | 'hammam' } | null>(null);
   const [confirmModal, setConfirmModal] = useState<{ message: string; onConfirm: () => void } | null>(null);
   const [alertModal, setAlertModal] = useState<string | null>(null);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallButton, setShowInstallButton] = useState(false);
   const [clientName, setClientName] = useState('');
   const [bookingTime, setBookingTime] = useState('');
   const [bookingDate, setBookingDate] = useState(format(new Date(), 'yyyy-MM-dd'));
@@ -373,6 +375,30 @@ function BarberShop() {
       // Session check removed as per user request
     }
   }, [barbers, userRole, workerId, sessionId, t.kickedMessage]);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setShowInstallButton(true);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setDeferredPrompt(null);
+      setShowInstallButton(false);
+    }
+  };
 
   // Heartbeat for workers
   useEffect(() => {
@@ -845,6 +871,41 @@ function BarberShop() {
           </div>
         </div>
       </header>
+
+      <AnimatePresence>
+        {showInstallButton && userRole === 'client' && (
+          <motion.div
+            initial={{ y: 100, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 100, opacity: 0 }}
+            className="fixed bottom-24 left-4 right-4 z-[100]"
+          >
+            <div className="bg-gold-500 rounded-2xl p-4 flex items-center justify-between shadow-2xl shadow-gold-500/20 border border-white/20">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-black rounded-xl flex items-center justify-center">
+                  <Scissors size={20} className="text-gold-500" />
+                </div>
+                <div>
+                  <p className="text-xs font-black text-black uppercase tracking-tight">Install MR YOU App</p>
+                  <p className="text-[10px] text-black/60 font-bold">Book faster from your home screen</p>
+                </div>
+              </div>
+              <button
+                onClick={handleInstallClick}
+                className="px-4 py-2 bg-black text-gold-500 rounded-lg text-[10px] font-black uppercase tracking-widest"
+              >
+                Install
+              </button>
+              <button 
+                onClick={() => setShowInstallButton(false)}
+                className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center shadow-lg"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <main className="max-w-7xl mx-auto px-4 py-8 sm:py-12">
         {/* Hero Section */}
