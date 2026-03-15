@@ -250,6 +250,8 @@ function BarberShop() {
   const [alertModal, setAlertModal] = useState<string | null>(null);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showInstallButton, setShowInstallButton] = useState(false);
+  const [isIOS, setIsIOS] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
   const [clientName, setClientName] = useState('');
   const [bookingTime, setBookingTime] = useState('');
   const [bookingDate, setBookingDate] = useState(format(new Date(), 'yyyy-MM-dd'));
@@ -377,7 +379,16 @@ function BarberShop() {
   }, [barbers, userRole, workerId, sessionId, t.kickedMessage]);
 
   useEffect(() => {
+    // Check if already installed
+    const isStandaloneMode = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone;
+    setIsStandalone(!!isStandaloneMode);
+
+    // Check if iOS
+    const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+    setIsIOS(isIOSDevice);
+
     const handleBeforeInstallPrompt = (e: any) => {
+      console.log('beforeinstallprompt event fired');
       e.preventDefault();
       setDeferredPrompt(e);
       setShowInstallButton(true);
@@ -385,18 +396,31 @@ function BarberShop() {
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
 
+    // For iOS or if the event doesn't fire, we can show a manual guide after some time
+    const timer = setTimeout(() => {
+      if (!isStandaloneMode && (isIOSDevice || !deferredPrompt)) {
+        setShowInstallButton(true);
+      }
+    }, 5000);
+
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      clearTimeout(timer);
     };
-  }, []);
+  }, [deferredPrompt]);
 
   const handleInstallClick = async () => {
-    if (!deferredPrompt) return;
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    if (outcome === 'accepted') {
-      setDeferredPrompt(null);
-      setShowInstallButton(false);
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setDeferredPrompt(null);
+        setShowInstallButton(false);
+      }
+    } else if (isIOS) {
+      setAlertModal('To install on iPhone: Tap the "Share" button at the bottom of Safari and select "Add to Home Screen".');
+    } else {
+      setAlertModal('To install: Open your browser menu (three dots) and select "Install App" or "Add to Home Screen".');
     }
   };
 
@@ -873,7 +897,7 @@ function BarberShop() {
       </header>
 
       <AnimatePresence>
-        {showInstallButton && userRole === 'client' && (
+        {showInstallButton && userRole === 'client' && !isStandalone && (
           <motion.div
             initial={{ y: 100, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
@@ -886,15 +910,19 @@ function BarberShop() {
                   <Scissors size={20} className="text-gold-500" />
                 </div>
                 <div>
-                  <p className="text-xs font-black text-black uppercase tracking-tight">Install MR YOU App</p>
-                  <p className="text-[10px] text-black/60 font-bold">Book faster from your home screen</p>
+                  <p className="text-xs font-black text-black uppercase tracking-tight">
+                    {isIOS ? 'Install MR YOU on iPhone' : 'Install MR YOU App'}
+                  </p>
+                  <p className="text-[10px] text-black/60 font-bold">
+                    {isIOS ? 'Tap Share > Add to Home Screen' : 'Book faster from your home screen'}
+                  </p>
                 </div>
               </div>
               <button
                 onClick={handleInstallClick}
                 className="px-4 py-2 bg-black text-gold-500 rounded-lg text-[10px] font-black uppercase tracking-widest"
               >
-                Install
+                {isIOS ? 'How?' : 'Install'}
               </button>
               <button 
                 onClick={() => setShowInstallButton(false)}
