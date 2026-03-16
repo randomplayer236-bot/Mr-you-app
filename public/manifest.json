@@ -1,16 +1,15 @@
 {
-  "name": "MR YOU - Premium Barber Shop",
+  "name": "MR YOU",
   "short_name": "MR YOU",
-  "description": "Experience the ultimate grooming at MR YOU. Book your haircut, VIP service, or Hammam session instantly with our premium management app.",
+  "description": "MR YOU - Premium Barber Shop. Book your professional haircut, VIP services, and Hammam sessions instantly.",
   "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "display_override": ["standalone", "window-controls-overlay"],
   "background_color": "#000000",
   "theme_color": "#000000",
   "orientation": "portrait",
-  "categories": ["lifestyle", "business", "utilities"],
+  "prefer_related_applications": false,
   "icons": [
     {
       "src": "https://storage.googleapis.com/m-ai-studio/m-ai-studio-public/attachments/67d6e647-86c4-4b55-8774-60e0a516087d.png",

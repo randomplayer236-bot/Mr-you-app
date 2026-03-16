@@ -346,24 +346,6 @@ function BarberShop() {
 
         const appleIcon = document.getElementById('apple-icon');
         if (appleIcon) appleIcon.setAttribute('href', currentLogo);
-
-        const manifest = {
-          "name": "MR YOU",
-          "short_name": "MR YOU",
-          "description": "Premium Barber Shop management and booking app.",
-          "start_url": "/",
-          "display": "standalone",
-          "background_color": "#000000",
-          "theme_color": "#000000",
-          "icons": [
-            { "src": currentLogo, "sizes": "192x192", "type": "image/png" },
-            { "src": currentLogo, "sizes": "512x512", "type": "image/png" }
-          ]
-        };
-        const blob = new Blob([JSON.stringify(manifest)], {type: 'application/json'});
-        const manifestURL = URL.createObjectURL(blob);
-        const manifestLink = document.getElementById('manifest-link');
-        if (manifestLink) manifestLink.setAttribute('href', manifestURL);
       } else {
         setDoc(doc(db, 'settings', 'global'), { currentDay: 'Thursday', logoUrl: '', shopPhotos: ['', '', ''] })
           .catch(e => handleFirestoreError(e, OperationType.WRITE, 'settings/global'));
@@ -438,10 +420,10 @@ function BarberShop() {
 
     // For iOS or if the event doesn't fire, we can show a manual guide after some time
     const timer = setTimeout(() => {
-      if (!isStandaloneMode && (isIOSDevice || !deferredPrompt)) {
+      if (!isStandaloneMode) {
         setShowInstallButton(true);
       }
-    }, 4000);
+    }, 6000);
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
@@ -465,15 +447,7 @@ function BarberShop() {
     } else if (isIOS) {
       setAlertModal('To install on iPhone: Tap the "Share" button at the bottom of Safari and select "Add to Home Screen".');
     } else {
-      // For Android/Chrome, if it's not ready yet, give it a moment
-      setAlertModal('Preparing the installation... If the prompt doesn\'t appear in 2 seconds, please use the browser menu (three dots) and select "Install App".');
-      
-      // Try to trigger it again if it somehow arrived late
-      if (!deferredPrompt) {
-        setTimeout(() => {
-          if (deferredPrompt) deferredPrompt.prompt();
-        }, 2000);
-      }
+      setAlertModal('The app is preparing for installation. If the prompt doesn\'t appear in a few seconds, please use the browser menu (three dots) and select "Install App".');
     }
   };
 
