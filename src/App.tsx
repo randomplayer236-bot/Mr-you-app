@@ -418,12 +418,12 @@ function BarberShop() {
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     window.addEventListener('appinstalled', handleAppInstalled);
 
-    // For iOS or if the event doesn't fire, we can show a manual guide after some time
+    // For iOS or if the event doesn't fire, we show the button after a short delay
     const timer = setTimeout(() => {
       if (!isStandaloneMode) {
         setShowInstallButton(true);
       }
-    }, 6000);
+    }, 3000);
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
@@ -432,22 +432,41 @@ function BarberShop() {
     };
   }, [deferredPrompt]);
 
+  const [isInstalling, setIsInstalling] = useState(false);
+  const [installProgress, setInstallProgress] = useState(0);
+
   const handleInstallClick = async () => {
     if (deferredPrompt) {
       try {
         await deferredPrompt.prompt();
         const { outcome } = await deferredPrompt.userChoice;
         if (outcome === 'accepted') {
-          setDeferredPrompt(null);
-          setShowInstallButton(false);
+          setIsInstalling(true);
+          let progress = 0;
+          const interval = setInterval(() => {
+            progress += Math.random() * 40;
+            if (progress >= 100) {
+              setInstallProgress(100);
+              clearInterval(interval);
+              setTimeout(() => {
+                setDeferredPrompt(null);
+                setShowInstallButton(false);
+                setIsInstalling(false);
+              }, 500);
+            } else {
+              setInstallProgress(progress);
+            }
+          }, 150);
         }
       } catch (err) {
         console.error('Installation prompt failed:', err);
       }
     } else if (isIOS) {
-      setAlertModal('To install on iPhone: Tap the "Share" button at the bottom of Safari and select "Add to Home Screen".');
+      setAlertModal('To install: Tap the "Share" button at the bottom of Safari and select "Add to Home Screen".');
     } else {
-      setAlertModal('The app is preparing for installation. If the prompt doesn\'t appear in a few seconds, please use the browser menu (three dots) and select "Install App".');
+      // If deferredPrompt is null, the browser might still be checking PWA criteria
+      // We'll try to trigger the native menu if possible
+      setAlertModal('The app is finalizing its setup. Please try again in 2 seconds, or use the browser menu (three dots) and select "Install App".');
     }
   };
 
@@ -931,32 +950,47 @@ function BarberShop() {
             exit={{ y: 100, opacity: 0 }}
             className="fixed bottom-24 left-4 right-4 z-[100]"
           >
-            <div className="bg-gold-500 rounded-2xl p-4 flex items-center justify-between shadow-2xl shadow-gold-500/20 border border-white/20">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-black rounded-xl flex items-center justify-center">
-                  <Scissors size={20} className="text-gold-500" />
+            <div className="bg-gold-500 rounded-2xl p-4 shadow-2xl shadow-gold-500/20 border border-white/20 relative overflow-hidden">
+              {isInstalling && (
+                <motion.div 
+                  initial={{ width: 0 }}
+                  animate={{ width: `${installProgress}%` }}
+                  className="absolute top-0 left-0 h-1 bg-black/30 z-0"
+                />
+              )}
+              
+              <div className="flex items-center justify-between relative z-10">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-black rounded-xl flex items-center justify-center">
+                    <Scissors size={20} className="text-gold-500" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-black text-black uppercase tracking-tight">
+                      {isInstalling ? 'Installing MR YOU...' : (isIOS ? 'Install MR YOU on iPhone' : 'Install MR YOU App')}
+                    </p>
+                    <p className="text-[10px] text-black/60 font-bold">
+                      {isInstalling ? `${Math.round(installProgress)}% completed` : (isIOS ? 'Tap Share > Add to Home Screen' : 'Ready to install on your phone')}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-xs font-black text-black uppercase tracking-tight">
-                    {isIOS ? 'Install MR YOU on iPhone' : 'Install MR YOU App'}
-                  </p>
-                  <p className="text-[10px] text-black/60 font-bold">
-                    {isIOS ? 'Tap Share > Add to Home Screen' : 'Book faster from your home screen'}
-                  </p>
-                </div>
+                {!isInstalling && (
+                  <button
+                    onClick={handleInstallClick}
+                    className="px-4 py-2 bg-black text-gold-500 rounded-lg text-[10px] font-black uppercase tracking-widest active:scale-95 transition-transform"
+                  >
+                    {isIOS ? 'How?' : 'Install'}
+                  </button>
+                )}
               </div>
-              <button
-                onClick={handleInstallClick}
-                className="px-4 py-2 bg-black text-gold-500 rounded-lg text-[10px] font-black uppercase tracking-widest"
-              >
-                {isIOS ? 'How?' : 'Install'}
-              </button>
-              <button 
-                onClick={() => setShowInstallButton(false)}
-                className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center shadow-lg"
-              >
-                <X size={12} />
-              </button>
+              
+              {!isInstalling && (
+                <button 
+                  onClick={() => setShowInstallButton(false)}
+                  className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center shadow-lg"
+                >
+                  <X size={12} />
+                </button>
+              )}
             </div>
           </motion.div>
         )}
