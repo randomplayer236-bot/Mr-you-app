@@ -3,7 +3,8 @@ const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/favicon.ico'
+  '/favicon.ico',
+  'https://storage.googleapis.com/m-ai-studio/m-ai-studio-public/attachments/67d6e647-86c4-4b55-8774-60e0a516087d.png'
 ];
 
 // Install event - precache core assets

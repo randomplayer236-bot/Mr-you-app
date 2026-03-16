@@ -337,33 +337,33 @@ function BarberShop() {
           vipPhotoUrl: data.vipPhotoUrl || ''
         });
         
-        if (data.logoUrl) {
-          const link = document.querySelector("link[rel~='icon']") || document.createElement('link');
-          (link as HTMLLinkElement).rel = 'icon';
-          (link as HTMLLinkElement).href = data.logoUrl;
-          document.getElementsByTagName('head')[0].appendChild(link);
+        const currentLogo = data.logoUrl || 'https://storage.googleapis.com/m-ai-studio/m-ai-studio-public/attachments/67d6e647-86c4-4b55-8774-60e0a516087d.png';
+        
+        const link = document.querySelector("link[rel~='icon']") || document.createElement('link');
+        (link as HTMLLinkElement).rel = 'icon';
+        (link as HTMLLinkElement).href = currentLogo;
+        document.getElementsByTagName('head')[0].appendChild(link);
 
-          const appleIcon = document.getElementById('apple-icon');
-          if (appleIcon) appleIcon.setAttribute('href', data.logoUrl);
+        const appleIcon = document.getElementById('apple-icon');
+        if (appleIcon) appleIcon.setAttribute('href', currentLogo);
 
-          const manifest = {
-            "name": "MR YOU",
-            "short_name": "MR YOU",
-            "description": "Premium Barber Shop management and booking app.",
-            "start_url": "/",
-            "display": "standalone",
-            "background_color": "#000000",
-            "theme_color": "#000000",
-            "icons": [
-              { "src": data.logoUrl, "sizes": "192x192", "type": "image/png" },
-              { "src": data.logoUrl, "sizes": "512x512", "type": "image/png" }
-            ]
-          };
-          const blob = new Blob([JSON.stringify(manifest)], {type: 'application/json'});
-          const manifestURL = URL.createObjectURL(blob);
-          const manifestLink = document.getElementById('manifest-link');
-          if (manifestLink) manifestLink.setAttribute('href', manifestURL);
-        }
+        const manifest = {
+          "name": "MR YOU",
+          "short_name": "MR YOU",
+          "description": "Premium Barber Shop management and booking app.",
+          "start_url": "/",
+          "display": "standalone",
+          "background_color": "#000000",
+          "theme_color": "#000000",
+          "icons": [
+            { "src": currentLogo, "sizes": "192x192", "type": "image/png" },
+            { "src": currentLogo, "sizes": "512x512", "type": "image/png" }
+          ]
+        };
+        const blob = new Blob([JSON.stringify(manifest)], {type: 'application/json'});
+        const manifestURL = URL.createObjectURL(blob);
+        const manifestLink = document.getElementById('manifest-link');
+        if (manifestLink) manifestLink.setAttribute('href', manifestURL);
       } else {
         setDoc(doc(db, 'settings', 'global'), { currentDay: 'Thursday', logoUrl: '', shopPhotos: ['', '', ''] })
           .catch(e => handleFirestoreError(e, OperationType.WRITE, 'settings/global'));
