@@ -104,7 +104,7 @@ class ErrorBoundary extends (React.Component as any) {
         const errorData = JSON.parse(this.state.error?.message);
         if (errorData.error && errorData.error.includes("Quota limit exceeded")) {
           isQuotaError = true;
-          displayMessage = "The application has reached its daily database limit. This usually resets every 24 hours. Please check back tomorrow!";
+          displayMessage = "The application has reached its daily database limit. This usually resets every 24 hours at midnight. Please check back tomorrow!";
         } else {
           displayMessage = errorData.error || displayMessage;
         }
@@ -122,12 +122,19 @@ class ErrorBoundary extends (React.Component as any) {
             <p className="text-gold-200/60 text-sm mb-8 leading-relaxed">
               {displayMessage}
             </p>
-            <button 
-              onClick={() => window.location.reload()} 
-              className="px-8 py-3 bg-gold-500 text-black rounded-2xl font-black uppercase tracking-widest hover:bg-gold-400 transition-all shadow-lg shadow-gold-500/20"
-            >
-              Reload
-            </button>
+            <div className="flex flex-col gap-4">
+              <button 
+                onClick={() => window.location.reload()} 
+                className="w-full py-4 bg-gold-500 text-black rounded-2xl font-black uppercase tracking-widest hover:bg-gold-400 transition-all shadow-lg shadow-gold-500/20"
+              >
+                Try Again
+              </button>
+              {isQuotaError && (
+                <p className="text-[10px] text-white/30 font-bold uppercase tracking-widest">
+                  Resetting in approx. 12 hours
+                </p>
+              )}
+            </div>
           </div>
         </div>
       );
