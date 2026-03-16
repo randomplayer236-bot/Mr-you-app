@@ -426,34 +426,54 @@ function BarberShop() {
       setShowInstallButton(true);
     };
 
+    const handleAppInstalled = () => {
+      console.log('App was installed');
+      setDeferredPrompt(null);
+      setShowInstallButton(false);
+      setIsStandalone(true);
+    };
+
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
 
     // For iOS or if the event doesn't fire, we can show a manual guide after some time
-    // We reduced this to 3 seconds to feel faster
     const timer = setTimeout(() => {
       if (!isStandaloneMode && (isIOSDevice || !deferredPrompt)) {
         setShowInstallButton(true);
       }
-    }, 3000);
+    }, 4000);
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
       clearTimeout(timer);
     };
   }, [deferredPrompt]);
 
   const handleInstallClick = async () => {
     if (deferredPrompt) {
-      deferredPrompt.prompt();
-      const { outcome } = await deferredPrompt.userChoice;
-      if (outcome === 'accepted') {
-        setDeferredPrompt(null);
-        setShowInstallButton(false);
+      try {
+        await deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        if (outcome === 'accepted') {
+          setDeferredPrompt(null);
+          setShowInstallButton(false);
+        }
+      } catch (err) {
+        console.error('Installation prompt failed:', err);
       }
     } else if (isIOS) {
       setAlertModal('To install on iPhone: Tap the "Share" button at the bottom of Safari and select "Add to Home Screen".');
     } else {
-      setAlertModal('To install: Open your browser menu (three dots) and select "Install App" or "Add to Home Screen".');
+      // For Android/Chrome, if it's not ready yet, give it a moment
+      setAlertModal('Preparing the installation... If the prompt doesn\'t appear in 2 seconds, please use the browser menu (three dots) and select "Install App".');
+      
+      // Try to trigger it again if it somehow arrived late
+      if (!deferredPrompt) {
+        setTimeout(() => {
+          if (deferredPrompt) deferredPrompt.prompt();
+        }, 2000);
+      }
     }
   };
 
