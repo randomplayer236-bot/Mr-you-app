@@ -39,6 +39,7 @@ import {
   deleteDoc, 
   query, 
   orderBy, 
+  limit,
   addDoc, 
   serverTimestamp,
   writeBatch
@@ -96,13 +97,37 @@ class ErrorBoundary extends (React.Component as any) {
   componentDidCatch(error: any, info: any) { console.error(error, info); }
   render() {
     if (this.state.hasError) {
+      let displayMessage = "Something went wrong. Please try again later.";
+      let isQuotaError = false;
+
+      try {
+        const errorData = JSON.parse(this.state.error?.message);
+        if (errorData.error && errorData.error.includes("Quota limit exceeded")) {
+          isQuotaError = true;
+          displayMessage = "The application has reached its daily database limit. This usually resets every 24 hours. Please check back tomorrow!";
+        } else {
+          displayMessage = errorData.error || displayMessage;
+        }
+      } catch (e) {
+        displayMessage = this.state.error?.message || displayMessage;
+      }
+
       return (
         <div className="min-h-screen bg-black flex items-center justify-center p-6 text-center">
           <div className="max-w-md w-full bg-gold-500/10 border border-gold-500/20 rounded-[2.5rem] p-10 shadow-2xl">
             <AlertCircle className="text-gold-400 mx-auto mb-4" size={48} />
-            <h2 className="text-2xl font-black uppercase tracking-tighter text-white mb-4">Application Error</h2>
-            <p className="text-gold-200/60 text-sm mb-8">{this.state.error?.message || "Something went wrong"}</p>
-            <button onClick={() => window.location.reload()} className="px-8 py-3 bg-gold-500 text-black rounded-2xl font-black uppercase tracking-widest hover:bg-gold-400 transition-all shadow-lg shadow-gold-500/20">Reload</button>
+            <h2 className="text-2xl font-black uppercase tracking-tighter text-white mb-4">
+              {isQuotaError ? "Daily Limit Reached" : "Application Error"}
+            </h2>
+            <p className="text-gold-200/60 text-sm mb-8 leading-relaxed">
+              {displayMessage}
+            </p>
+            <button 
+              onClick={() => window.location.reload()} 
+              className="px-8 py-3 bg-gold-500 text-black rounded-2xl font-black uppercase tracking-widest hover:bg-gold-400 transition-all shadow-lg shadow-gold-500/20"
+            >
+              Reload
+            </button>
           </div>
         </div>
       );
@@ -285,12 +310,12 @@ function BarberShop() {
       setBarbers(data);
     }, (e) => handleFirestoreError(e, OperationType.GET, 'barbers'));
 
-    const qBk = query(collection(db, 'bookings'), orderBy('createdAt', 'asc'));
+    const qBk = query(collection(db, 'bookings'), orderBy('createdAt', 'desc'), limit(100));
     const unsubBk = onSnapshot(qBk, (snap) => {
-      setBookings(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Booking)));
+      setBookings(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Booking)).reverse());
     }, (e) => handleFirestoreError(e, OperationType.GET, 'bookings'));
 
-    const qN = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'));
+    const qN = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'), limit(30));
     const unsubN = onSnapshot(qN, (snap) => {
       setNotifications(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Notification)));
     }, (e) => handleFirestoreError(e, OperationType.GET, 'notifications'));
@@ -338,7 +363,7 @@ function BarberShop() {
       }
     }, (e) => handleFirestoreError(e, OperationType.GET, 'settings/global'));
 
-    const qG = query(collection(db, 'gallery'), orderBy('createdAt', 'desc'));
+    const qG = query(collection(db, 'gallery'), orderBy('createdAt', 'desc'), limit(20));
     const unsubG = onSnapshot(qG, (snap) => {
       setGalleryVideos(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as GalleryVideo)));
     }, (e) => handleFirestoreError(e, OperationType.GET, 'gallery'));
