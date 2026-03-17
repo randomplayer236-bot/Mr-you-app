@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, Component } from 'react';
 import type { ReactNode, ErrorInfo } from 'react';
 import { 
   Users, 
@@ -50,6 +50,23 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { format, addMinutes, isAfter, parseISO } from 'date-fns';
 
+if (typeof window !== 'undefined') {
+  window.onerror = (msg, url, line, col, error) => {
+    console.error("Global Error:", { msg, url, line, col, error });
+    const root = document.getElementById('root');
+    if (root && root.innerHTML === '') {
+      root.innerHTML = `<div style="color: white; padding: 40px; background: black; height: 100vh; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;">
+        <h1 style="color: #d4af37; font-size: 24px; margin-bottom: 10px;">MR YOU - System Error</h1>
+        <p style="opacity: 0.6; margin-bottom: 20px;">We encountered a critical error during startup.</p>
+        <div style="background: #111; padding: 20px; border-radius: 10px; overflow: auto; max-width: 80%; font-size: 12px; color: #ff4444; text-align: left; margin-bottom: 20px; border: 1px solid #333;">
+          <code>${msg}</code>
+        </div>
+        <button onclick="window.location.reload()" style="background: #d4af37; color: black; border: none; padding: 12px 24px; border-radius: 10px; cursor: pointer; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;">Reload Application</button>
+      </div>`;
+    }
+  };
+}
+
 // Utility for tailwind classes
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -86,53 +103,60 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   throw new Error(JSON.stringify(errInfo));
 }
 
+interface ErrorBoundaryProps {
+  children: React.ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: any;
+}
+
 // --- Error Boundary ---
-class ErrorBoundary extends (React.Component as any) {
+class ErrorBoundary extends (Component as any) {
   constructor(props: any) {
     super(props);
     this.state = { hasError: false, error: null };
   }
   static getDerivedStateFromError(error: any) { return { hasError: true, error }; }
-  componentDidCatch(error: any, info: any) { console.error(error, info); }
+  componentDidCatch(error: any, info: any) { 
+    console.error("ErrorBoundary caught an error:", error, info); 
+  }
   render() {
     if (this.state.hasError) {
-      let displayMessage = "Something went wrong. Please try again later.";
-      let isQuotaError = false;
-
-      try {
-        const errorData = JSON.parse(this.state.error?.message);
-        if (errorData.error && errorData.error.includes("Quota limit exceeded")) {
-          isQuotaError = true;
-          displayMessage = "The application has reached its daily database limit. This usually resets every 24 hours at midnight. Please check back tomorrow!";
-        } else {
-          displayMessage = errorData.error || displayMessage;
-        }
-      } catch (e) {
-        displayMessage = this.state.error?.message || displayMessage;
-      }
-
+      const errorMsg = this.state.error?.message || String(this.state.error);
+      const isQuotaError = errorMsg.toLowerCase().includes('quota exceeded') || 
+                          errorMsg.toLowerCase().includes('quota');
+      
       return (
         <div className="min-h-screen bg-black flex items-center justify-center p-6 text-center">
-          <div className="max-w-md w-full bg-gold-500/10 border border-gold-500/20 rounded-[2.5rem] p-10 shadow-2xl">
-            <AlertCircle className="text-gold-400 mx-auto mb-4" size={48} />
-            <h2 className="text-2xl font-black uppercase tracking-tighter text-white mb-4">
-              {isQuotaError ? "Daily Limit Reached" : "Application Error"}
-            </h2>
-            <p className="text-gold-200/60 text-sm mb-8 leading-relaxed">
-              {displayMessage}
-            </p>
-            <div className="flex flex-col gap-4">
-              <button 
-                onClick={() => window.location.reload()} 
-                className="w-full py-4 bg-gold-500 text-black rounded-2xl font-black uppercase tracking-widest hover:bg-gold-400 transition-all shadow-lg shadow-gold-500/20"
-              >
-                Try Again
-              </button>
-              {isQuotaError && (
-                <p className="text-[10px] text-white/30 font-bold uppercase tracking-widest">
-                  Resetting in approx. 12 hours
-                </p>
-              )}
+          <div className="max-w-md w-full space-y-6">
+            <div className="w-20 h-20 bg-red-500/10 rounded-full flex items-center justify-center mx-auto border border-red-500/20">
+              <AlertCircle className="text-red-500" size={40} />
+            </div>
+            <div className="space-y-2">
+              <h2 className="text-2xl font-serif italic text-white">
+                {isQuotaError ? "Service Temporarily Unavailable" : "Something went wrong"}
+              </h2>
+              <p className="text-white/40 text-sm">
+                {isQuotaError 
+                  ? "The daily free limit for the database has been reached. It will reset tomorrow at midnight."
+                  : "We encountered an unexpected error. Please try refreshing the page."}
+              </p>
+            </div>
+            <button 
+              onClick={() => window.location.reload()}
+              className="bg-gold-500 text-black px-8 py-3 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-gold-400 transition-colors shadow-lg shadow-gold-500/20"
+            >
+              Refresh Page
+            </button>
+            <div className="pt-8 border-t border-white/5">
+              <p className="text-[10px] text-white/10 uppercase tracking-widest mb-2">Error Details</p>
+              <div className="bg-white/5 p-4 rounded-xl text-left overflow-auto max-h-40 custom-scrollbar">
+                <code className="text-[10px] text-red-400/60 break-all leading-relaxed">
+                  {errorMsg}
+                </code>
+              </div>
             </div>
           </div>
         </div>
@@ -211,7 +235,8 @@ const TRANSLATIONS = {
     cancelBooking: 'Cancel Booking',
     cancelSuccess: 'Booking cancelled successfully.',
     cancelTimeLimit: 'You can only cancel at least 2 hours before the appointment.',
-    ourVideos: 'Our Videos'
+    ourVideos: 'Our Videos',
+    barbers: 'Barbers'
   },
   fr: {
     title: 'MR YOU', 
@@ -241,7 +266,8 @@ const TRANSLATIONS = {
     cancelBooking: 'Annuler la réservation',
     cancelSuccess: 'Réservation annulée avec succès.',
     cancelTimeLimit: 'Vous ne pouvez annuler qu\'au moins 2 heures avant le rendez-vous.',
-    ourVideos: 'Nos Vidéos'
+    ourVideos: 'Nos Vidéos',
+    barbers: 'Barbiers'
   },
   ar: {
     title: 'MR YOU', 
@@ -271,7 +297,8 @@ const TRANSLATIONS = {
     cancelBooking: 'إلغاء الحجز',
     cancelSuccess: 'تم إلغاء الحجز بنجاح.',
     cancelTimeLimit: 'يمكنك الإلغاء قبل ساعتين على الأقل من الموعد.',
-    ourVideos: 'فيديوهاتنا'
+    ourVideos: 'فيديوهاتنا',
+    barbers: 'الحلاقين'
   }
 };
 
@@ -617,7 +644,7 @@ function BarberShop() {
       formData.append('file', file);
       formData.append('folder', 'logos');
 
-      const response = await fetch('/api/upload', {
+      const response = await fetch('/server-api/upload', {
         method: 'POST',
         body: formData,
       });
@@ -654,7 +681,7 @@ function BarberShop() {
       formData.append('file', file);
       formData.append('folder', 'shop_photos');
 
-      const response = await fetch('/api/upload', {
+      const response = await fetch('/server-api/upload', {
         method: 'POST',
         body: formData,
       });
@@ -704,7 +731,7 @@ function BarberShop() {
       formData.append('file', file);
       formData.append('folder', 'shop_videos');
 
-      const response = await fetch('/api/upload', {
+      const response = await fetch('/server-api/upload', {
         method: 'POST',
         body: formData,
       });
@@ -736,7 +763,7 @@ function BarberShop() {
       onConfirm: async () => {
         try {
           if (video?.storagePath) {
-            await fetch('/api/delete', {
+            await fetch('/server-api/delete', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ storagePath: video.storagePath }),
@@ -758,7 +785,7 @@ function BarberShop() {
       formData.append('file', file);
       formData.append('folder', 'vip_photos');
 
-      const response = await fetch('/api/upload', {
+      const response = await fetch('/server-api/upload', {
         method: 'POST',
         body: formData,
       });
@@ -800,7 +827,7 @@ function BarberShop() {
       formData.append('file', file);
       formData.append('folder', 'barbers');
 
-      const response = await fetch('/api/upload', {
+      const response = await fetch('/server-api/upload', {
         method: 'POST',
         body: formData,
       });
@@ -953,7 +980,7 @@ function BarberShop() {
       formData.append('file', file);
       formData.append('folder', 'gallery');
 
-      const response = await fetch('/api/upload', {
+      const response = await fetch('/server-api/upload', {
         method: 'POST',
         body: formData,
       });
@@ -985,7 +1012,7 @@ function BarberShop() {
       onConfirm: async () => {
         try {
           if (video?.storagePath) {
-            await fetch('/api/delete', {
+            await fetch('/server-api/delete', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ storagePath: video.storagePath }),
@@ -1029,9 +1056,15 @@ function BarberShop() {
 
   const visibleNotifications = useMemo(() => {
     return notifications.filter(n => {
-      const isShop = n.barberId === shopMain?.id;
+      if (!shopMain) {
+        if (userRole === 'admin' || userRole === 'manager') return true;
+        if (userRole === 'worker') return n.barberId === workerId;
+        return false;
+      }
+      
+      const isShop = n.barberId === shopMain.id;
       if (isShop) {
-        return userRole === 'manager';
+        return userRole === 'manager' || userRole === 'admin';
       }
       if (userRole === 'worker') {
         return n.barberId === workerId;
@@ -1041,7 +1074,7 @@ function BarberShop() {
   }, [notifications, userRole, workerId, shopMain]);
 
   return (
-    <div className={cn("min-h-screen bg-black text-white selection:bg-gold-500/30 selection:text-gold-200", isRtl ? 'rtl' : 'ltr')}>
+    <div className={`min-h-screen bg-black text-white selection:bg-gold-500/30 selection:text-gold-200 ${isRtl ? 'rtl' : 'ltr'}`}>
       <header className="border-b border-gold-500/10 bg-black/80 backdrop-blur-xl sticky top-0 z-50">
         <div className="bg-gradient-to-r from-gold-950/40 via-black to-gold-950/40 border-b border-gold-500/10 py-3 overflow-x-auto custom-scrollbar">
           <div className="max-w-7xl mx-auto px-4 flex items-center justify-center gap-3 min-w-max">
@@ -1273,7 +1306,7 @@ function BarberShop() {
             )}>
               <div className="flex flex-col lg:flex-row gap-12 sm:gap-16 items-center lg:items-start">
                 <div className="flex-1 w-full">
-                  <h2 className="text-5xl sm:text-8xl font-serif italic mb-2 bg-clip-text text-transparent bg-gradient-to-b from-gold-200 via-gold-400 to-gold-600 tracking-tight text-center lg:text-left">{shopMain.name}</h2>
+                  <h2 className="text-5xl sm:text-8xl font-serif italic mb-2 bg-clip-text text-transparent bg-gradient-to-b from-gold-200 via-gold-400 to-gold-600 tracking-tight text-center lg:text-left">{shopMain?.name || t.title}</h2>
                   
                   {/* Shop Photos */}
                   <div className="mb-12">
@@ -1324,7 +1357,7 @@ function BarberShop() {
                             <p className="text-[8px] text-white/40 uppercase tracking-tighter font-bold">{t.hammamDetails}</p>
                           </div>
                           <button 
-                            onClick={() => setBookingModal({ barberId: shopMain.id, serviceType: 'hammam' })}
+                            onClick={() => shopMain && setBookingModal({ barberId: shopMain.id, serviceType: 'hammam' })}
                             className="ml-auto px-3 py-1.5 bg-blue-500 text-white rounded-lg text-[8px] font-black uppercase tracking-widest hover:bg-blue-400 transition-all"
                           >
                             {t.bookNow}
@@ -1572,7 +1605,7 @@ function BarberShop() {
 
                   <div className="space-y-4 mb-12 max-h-80 overflow-y-auto pr-4 custom-scrollbar hidden">
                     {bookings
-                      .filter(b => b.barberId === shopMain.id && (b.dayName === settings.currentDay || (!b.dayName && format(parseISO(b.date), 'EEEE') === settings.currentDay)))
+                      .filter(b => shopMain && b.barberId === shopMain.id && (b.dayName === settings.currentDay || (!b.dayName && format(parseISO(b.date), 'EEEE') === settings.currentDay)))
                       .map((b, i) => {
                         const isToday = b.date === format(new Date(), 'yyyy-MM-dd');
                         return (
@@ -1613,7 +1646,7 @@ function BarberShop() {
                           </motion.div>
                         );
                       })}
-                    {bookings.filter(b => b.barberId === shopMain.id && (b.dayName === settings.currentDay || (!b.dayName && format(parseISO(b.date), 'EEEE') === settings.currentDay))).length === 0 && (
+                    {shopMain && bookings.filter(b => b.barberId === shopMain.id && (b.dayName === settings.currentDay || (!b.dayName && format(parseISO(b.date), 'EEEE') === settings.currentDay))).length === 0 && (
                       <div className="text-center py-16 border-2 border-dashed border-white/5 rounded-[2.5rem]">
                         <Scissors className="mx-auto text-white/5 mb-4" size={32} />
                         <p className="text-[11px] text-white/20 uppercase tracking-[0.3em] font-black">{t.noBookings}</p>
@@ -1625,7 +1658,7 @@ function BarberShop() {
                     <motion.button 
                       whileHover={{ scale: 1.02, y: -2 }}
                       whileTap={{ scale: 0.98 }}
-                      onClick={() => setBookingModal({ barberId: shopMain.id })} 
+                      onClick={() => shopMain && setBookingModal({ barberId: shopMain.id })} 
                       className="w-full py-6 bg-gradient-to-r from-gold-600 via-gold-500 to-gold-600 text-black rounded-[2rem] font-black text-xl uppercase tracking-[0.2em] shadow-[0_20px_50px_rgba(212,175,55,0.2)] hover:shadow-[0_25px_60px_rgba(212,175,55,0.3)] transition-all"
                     >
                       {t.bookNow}
@@ -2010,4 +2043,13 @@ function BarberShop() {
   );
 }
 
-export default function App() { return <ErrorBoundary><BarberShop /></ErrorBoundary>; }
+export default function App() { 
+  return (
+    <ErrorBoundary>
+      <div style={{ background: 'red', color: 'white', padding: '10px', position: 'fixed', top: 0, left: 0, zIndex: 9999, fontSize: '10px' }}>
+        DEBUG: App Mounted
+      </div>
+      <BarberShop />
+    </ErrorBoundary>
+  ); 
+}

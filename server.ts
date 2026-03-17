@@ -9,110 +9,161 @@ import fs from "fs";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load firebase config to get bucket name
-const firebaseConfig = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf8'));
-let bucketName = process.env.STORAGE_BUCKET || firebaseConfig.storageBucket;
-
-// Specific correction for user's common mistake
-if (bucketName === 'mr you files') {
-  bucketName = 'mr-you-files';
-}
-
-// Basic validation for GCS bucket names (no spaces, etc)
-if (bucketName && bucketName.includes(' ')) {
-  console.error(`Invalid bucket name detected: "${bucketName}". Bucket names cannot contain spaces. Falling back to default.`);
-  bucketName = firebaseConfig.storageBucket;
-}
-
-console.log(`Using storage bucket: ${bucketName}`);
-
-const storage = new Storage();
-const bucket = storage.bucket(bucketName);
-const upload = multer({ storage: multer.memoryStorage() });
-
 async function startServer() {
-  const app = express();
-  const PORT = 3000;
+  console.log("Starting server...");
+  try {
+    // Load firebase config to get bucket name
+    const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+    if (!fs.existsSync(configPath)) {
+      throw new Error(`Config file not found at ${configPath}`);
+    }
+    const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    let bucketName = process.env.STORAGE_BUCKET || firebaseConfig.storageBucket;
 
-  app.use(express.json());
+    // Specific correction for user's common mistake
+    if (bucketName === 'mr you files') {
+      bucketName = 'mr-you-files';
+    }
 
-  // API Route for Uploads
-  app.post("/api/upload", upload.single("file"), async (req, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ error: "No file uploaded" });
-      }
+    // Basic validation for GCS bucket names (no spaces, etc)
+    if (bucketName && bucketName.includes(' ')) {
+      console.error(`Invalid bucket name detected: "${bucketName}". Bucket names cannot contain spaces. Falling back to default.`);
+      bucketName = firebaseConfig.storageBucket;
+    }
 
-      const folder = req.body.folder || "uploads";
-      const blob = bucket.file(`${folder}/${Date.now()}_${req.file.originalname}`);
-      const blobStream = blob.createWriteStream({
-        resumable: false,
-        metadata: {
-          contentType: req.file.mimetype,
-        },
-      });
+    console.log(`Using storage bucket: ${bucketName}`);
 
-      blobStream.on("error", (err) => {
-        console.error("GCS Upload Error:", err);
-        res.status(500).json({ error: err.message });
-      });
+    const storage = new Storage();
+    const bucket = storage.bucket(bucketName);
+    const upload = multer({ storage: multer.memoryStorage() });
 
-      blobStream.on("finish", async () => {
-        try {
-          await blob.makePublic();
-        } catch (e) {
-          console.warn("Could not make file public, URL might be restricted:", e);
+    const app = express();
+    const PORT = 3000;
+
+    // Logging middleware - MUST BE FIRST
+    app.use((req, res, next) => {
+      console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+      next();
+    });
+
+    app.use(express.json());
+
+    app.get("/api/health", (req, res) => {
+      res.json({ status: "ok", bucket: bucketName });
+    });
+
+    app.get("/api/test", (req, res) => {
+      res.send("Express server is working!");
+    });
+
+    // API Route for Uploads
+    app.post("/server-api/upload", upload.single("file"), async (req, res) => {
+      console.log("Received upload request");
+      try {
+        if (!req.file) {
+          console.error("No file in request");
+          return res.status(400).json({ error: "No file uploaded" });
         }
-        
-        const publicUrl = `https://storage.googleapis.com/${bucket.name}/${blob.name}`;
-        res.status(200).json({ 
-          url: publicUrl,
-          storagePath: blob.name
+        console.log(`Uploading file: ${req.file.originalname} (${req.file.size} bytes)`);
+
+        const folder = req.body.folder || "uploads";
+        const blob = bucket.file(`${folder}/${Date.now()}_${req.file.originalname}`);
+        const blobStream = blob.createWriteStream({
+          resumable: false,
+          metadata: {
+            contentType: req.file.mimetype,
+          },
         });
-      });
 
-      blobStream.end(req.file.buffer);
-    } catch (error: any) {
-      console.error("Server Upload Error:", error);
-      res.status(500).json({ error: error.message });
-    }
-  });
+        blobStream.on("error", (err) => {
+          console.error("GCS Upload Error:", err);
+          if (!res.headersSent) {
+            res.status(500).json({ error: err.message });
+          }
+        });
 
-  // API Route for Deletions
-  app.post("/api/delete", async (req, res) => {
-    try {
-      const { storagePath } = req.body;
-      if (!storagePath) {
-        return res.status(400).json({ error: "No storagePath provided" });
+        blobStream.on("finish", async () => {
+          console.log("Upload finished, making public...");
+          try {
+            await blob.makePublic();
+          } catch (e) {
+            console.warn("Could not make file public, URL might be restricted:", e);
+          }
+          
+          const publicUrl = `https://storage.googleapis.com/${bucket.name}/${blob.name}`;
+          console.log(`File available at: ${publicUrl}`);
+          res.status(200).json({ 
+            url: publicUrl,
+            storagePath: blob.name
+          });
+        });
+
+        blobStream.end(req.file.buffer);
+      } catch (error: any) {
+        console.error("Server Upload Error:", error);
+        if (!res.headersSent) {
+          res.status(500).json({ error: error.message });
+        }
       }
+    });
 
-      const file = bucket.file(storagePath);
-      await file.delete();
-      res.status(200).json({ success: true });
-    } catch (error: any) {
-      console.error("Server Delete Error:", error);
-      res.status(500).json({ error: error.message });
+    // API Route for Deletions
+    app.post("/server-api/delete", async (req, res) => {
+      console.log("Received delete request:", req.body.storagePath);
+      try {
+        const { storagePath } = req.body;
+        if (!storagePath) {
+          return res.status(400).json({ error: "No storagePath provided" });
+        }
+
+        const file = bucket.file(storagePath);
+        await file.delete();
+        console.log("File deleted successfully");
+        res.status(200).json({ success: true });
+      } catch (error: any) {
+        console.error("Server Delete Error:", error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // API 404 handler - prevents falling through to Vite for missing API routes
+    app.use("/api/*all", (req, res) => {
+      res.status(404).json({ error: `API route not found: ${req.method} ${req.originalUrl}` });
+    });
+    app.use("/server-api/*all", (req, res) => {
+      res.status(404).json({ error: `API route not found: ${req.method} ${req.originalUrl}` });
+    });
+
+    // Vite middleware for development
+    if (process.env.NODE_ENV !== "production") {
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+    } else {
+      const distPath = path.join(process.cwd(), 'dist');
+      app.use(express.static(distPath));
+      app.get('*all', (req, res) => {
+        res.sendFile(path.join(distPath, 'index.html'));
+      });
     }
-  });
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
+    // Global error handler
+    app.use((err: any, req: any, res: any, next: any) => {
+      console.error("Express Error Handler:", err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: err.message || "Internal Server Error" });
+      }
     });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${PORT}`);
     });
+  } catch (error) {
+    console.error("CRITICAL: Failed to start server:", error);
+    process.exit(1);
   }
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
 }
 
 startServer();
