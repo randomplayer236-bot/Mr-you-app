@@ -13,6 +13,11 @@ const __dirname = path.dirname(__filename);
 const firebaseConfig = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf8'));
 let bucketName = process.env.STORAGE_BUCKET || firebaseConfig.storageBucket;
 
+// Specific correction for user's common mistake
+if (bucketName === 'mr you files') {
+  bucketName = 'mr-you-files';
+}
+
 // Basic validation for GCS bucket names (no spaces, etc)
 if (bucketName && bucketName.includes(' ')) {
   console.error(`Invalid bucket name detected: "${bucketName}". Bucket names cannot contain spaces. Falling back to default.`);
