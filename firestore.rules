@@ -50,5 +50,9 @@ service cloud.firestore {
     match /gallery/{videoId} {
       allow read, write: if true;
     }
+
+    match /shop_videos/{videoId} {
+      allow read, write: if true;
+    }
   }
 }

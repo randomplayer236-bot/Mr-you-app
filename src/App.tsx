@@ -44,8 +44,7 @@ import {
   serverTimestamp,
   writeBatch
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { db, auth, storage } from './firebase';
+import { db, auth } from './firebase';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -159,7 +158,8 @@ interface Barber {
   activeSessionId?: string;
   lastActive?: any;
 }
-interface GalleryVideo { id: string; url: string; storagePath?: string; createdAt: any; }
+interface GalleryVideo { id: string; url: string; storagePath?: string; type: 'video' | 'image'; createdAt: any; }
+interface ShopVideo { id: string; url: string; storagePath?: string; type: 'video' | 'image'; createdAt: any; }
 interface Booking { 
   id: string; 
   barberId: string; 
@@ -207,7 +207,11 @@ const TRANSLATIONS = {
     unbannedSection: 'Unbanned Section',
     gallery: 'Gallery',
     uploadVideo: 'Upload Video',
-    kickedMessage: 'You have been kicked from the shop. Access denied.'
+    kickedMessage: 'You have been kicked from the shop. Access denied.',
+    cancelBooking: 'Cancel Booking',
+    cancelSuccess: 'Booking cancelled successfully.',
+    cancelTimeLimit: 'You can only cancel at least 2 hours before the appointment.',
+    ourVideos: 'Our Videos'
   },
   fr: {
     title: 'MR YOU', 
@@ -233,7 +237,11 @@ const TRANSLATIONS = {
     unbannedSection: 'Section des bannis',
     gallery: 'Galerie',
     uploadVideo: 'Télécharger Vidéo',
-    kickedMessage: 'Vous avez été renvoyé du salon. Accès refusé.'
+    kickedMessage: 'Vous avez été renvoyé du salon. Accès refusé.',
+    cancelBooking: 'Annuler la réservation',
+    cancelSuccess: 'Réservation annulée avec succès.',
+    cancelTimeLimit: 'Vous ne pouvez annuler qu\'au moins 2 heures avant le rendez-vous.',
+    ourVideos: 'Nos Vidéos'
   },
   ar: {
     title: 'MR YOU', 
@@ -259,7 +267,11 @@ const TRANSLATIONS = {
     unbannedSection: 'قسم المحظورين',
     gallery: 'المعرض',
     uploadVideo: 'رفع فيديو',
-    kickedMessage: 'لقد تم طردك من المحل. تم رفض الوصول.'
+    kickedMessage: 'لقد تم طردك من المحل. تم رفض الوصول.',
+    cancelBooking: 'إلغاء الحجز',
+    cancelSuccess: 'تم إلغاء الحجز بنجاح.',
+    cancelTimeLimit: 'يمكنك الإلغاء قبل ساعتين على الأقل من الموعد.',
+    ourVideos: 'فيديوهاتنا'
   }
 };
 
@@ -269,8 +281,15 @@ function BarberShop() {
   const [workerId, setWorkerId] = useState<string | null>(null);
   const [barbers, setBarbers] = useState<Barber[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
-  const [settings, setSettings] = useState({ currentDay: 'Thursday', logoUrl: '', shopPhotos: ['', '', ''], vipPhotoUrl: '' });
+  const [settings, setSettings] = useState({ 
+    currentDay: 'Thursday', 
+    logoUrl: '', 
+    shopPhotos: ['', '', ''], 
+    vipPhotoUrl: '',
+    lastCleanupDate: ''
+  });
   const [galleryVideos, setGalleryVideos] = useState<GalleryVideo[]>([]);
+  const [shopVideos, setShopVideos] = useState<ShopVideo[]>([]);
   const [sessionId] = useState(() => Math.random().toString(36).substring(7));
   const [showWorkers, setShowWorkers] = useState(false);
   const [showPersonalBarbers, setShowPersonalBarbers] = useState(false);
@@ -334,7 +353,8 @@ function BarberShop() {
           currentDay: data.currentDay || 'Thursday',
           logoUrl: data.logoUrl || '',
           shopPhotos: data.shopPhotos || ['', '', ''],
-          vipPhotoUrl: data.vipPhotoUrl || ''
+          vipPhotoUrl: data.vipPhotoUrl || '',
+          lastCleanupDate: data.lastCleanupDate || ''
         });
         
         const currentLogo = data.logoUrl || 'https://storage.googleapis.com/m-ai-studio/m-ai-studio-public/attachments/67d6e647-86c4-4b55-8774-60e0a516087d.png';
@@ -347,7 +367,12 @@ function BarberShop() {
         const appleIcon = document.getElementById('apple-icon');
         if (appleIcon) appleIcon.setAttribute('href', currentLogo);
       } else {
-        setDoc(doc(db, 'settings', 'global'), { currentDay: 'Thursday', logoUrl: '', shopPhotos: ['', '', ''] })
+        setDoc(doc(db, 'settings', 'global'), { 
+          currentDay: 'Thursday', 
+          logoUrl: '', 
+          shopPhotos: ['', '', ''],
+          lastCleanupDate: ''
+        })
           .catch(e => handleFirestoreError(e, OperationType.WRITE, 'settings/global'));
       }
     }, (e) => handleFirestoreError(e, OperationType.GET, 'settings/global'));
@@ -357,7 +382,12 @@ function BarberShop() {
       setGalleryVideos(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as GalleryVideo)));
     }, (e) => handleFirestoreError(e, OperationType.GET, 'gallery'));
 
-    return () => { unsubB(); unsubBk(); unsubN(); unsubS(); unsubG(); };
+    const qSV = query(collection(db, 'shop_videos'), orderBy('createdAt', 'desc'), limit(10));
+    const unsubSV = onSnapshot(qSV, (snap) => {
+      setShopVideos(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as ShopVideo)));
+    }, (e) => handleFirestoreError(e, OperationType.GET, 'shop_videos'));
+
+    return () => { unsubB(); unsubBk(); unsubN(); unsubS(); unsubG(); unsubSV(); };
   }, []);
 
   useEffect(() => {
@@ -581,21 +611,26 @@ function BarberShop() {
     const file = e.target.files?.[0];
     if (!file) return;
     
-    if (file.size > 500000) {
-      setAlertModal('Logo must be smaller than 500KB');
-      return;
-    }
+    setAlertModal('Uploading logo...');
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('folder', 'logos');
 
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      const base64 = reader.result as string;
-      try {
-        await updateDoc(doc(db, 'settings', 'global'), { logoUrl: base64 });
-      } catch (err) {
-        handleFirestoreError(err, OperationType.UPDATE, 'settings/global');
-      }
-    };
-    reader.readAsDataURL(file);
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error('Upload failed');
+      const data = await response.json();
+      
+      await updateDoc(doc(db, 'settings', 'global'), { logoUrl: data.url });
+      setAlertModal('Logo updated!');
+    } catch (err) {
+      console.error(err);
+      setAlertModal('Logo upload failed.');
+    }
   };
 
   const deleteLogo = async () => {
@@ -612,17 +647,29 @@ function BarberShop() {
   const handleShopPhoto = async (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = async () => {
+
+    setAlertModal('Uploading photo...');
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('folder', 'shop_photos');
+
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error('Upload failed');
+      const data = await response.json();
+
       const newPhotos = [...settings.shopPhotos];
-      newPhotos[index] = reader.result as string;
-      try {
-        await updateDoc(doc(db, 'settings', 'global'), { shopPhotos: newPhotos });
-      } catch (err) {
-        handleFirestoreError(err, OperationType.UPDATE, 'settings/global');
-      }
-    };
-    reader.readAsDataURL(file);
+      newPhotos[index] = data.url;
+      await updateDoc(doc(db, 'settings', 'global'), { shopPhotos: newPhotos });
+      setAlertModal('Photo updated!');
+    } catch (err) {
+      console.error(err);
+      setAlertModal('Photo upload failed.');
+    }
   };
 
   const deleteShopPhoto = async (index: number) => {
@@ -638,18 +685,93 @@ function BarberShop() {
     });
   };
 
+  const handleShopVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    const isVideo = file.type.startsWith('video/');
+    const isImage = file.type.startsWith('image/');
+
+    if (!isVideo && !isImage) {
+      setAlertModal('Please upload a video or image file');
+      return;
+    }
+
+    setAlertModal('Uploading... Please wait.');
+    
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('folder', 'shop_videos');
+
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Upload failed');
+      }
+
+      const data = await response.json();
+      
+      await addDoc(collection(db, 'shop_videos'), {
+        url: data.url,
+        storagePath: data.storagePath,
+        type: isVideo ? 'video' : 'image',
+        createdAt: serverTimestamp()
+      });
+      setAlertModal('Uploaded successfully!');
+    } catch (err: any) {
+      console.error('Upload error details:', err);
+      setAlertModal(`Upload failed: ${err.message || 'Unknown error'}`);
+    }
+  };
+
+  const deleteShopVideo = async (id: string) => {
+    const video = shopVideos.find(v => v.id === id);
+    setConfirmModal({
+      message: 'Delete this item?',
+      onConfirm: async () => {
+        try {
+          if (video?.storagePath) {
+            await fetch('/api/delete', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ storagePath: video.storagePath }),
+            }).catch(console.error);
+          }
+          await deleteDoc(doc(db, 'shop_videos', id));
+        } catch (e) { handleFirestoreError(e, OperationType.DELETE, `shop_videos/${id}`); }
+      }
+    });
+  };
+
   const handleVipPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      try {
-        await updateDoc(doc(db, 'settings', 'global'), { vipPhotoUrl: reader.result as string });
-      } catch (err) {
-        handleFirestoreError(err, OperationType.UPDATE, 'settings/global');
-      }
-    };
-    reader.readAsDataURL(file);
+
+    setAlertModal('Uploading VIP photo...');
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('folder', 'vip_photos');
+
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error('Upload failed');
+      const data = await response.json();
+
+      await updateDoc(doc(db, 'settings', 'global'), { vipPhotoUrl: data.url });
+      setAlertModal('VIP photo updated!');
+    } catch (err) {
+      console.error(err);
+      setAlertModal('VIP photo upload failed.');
+    }
   };
 
   const deleteVipPhoto = async () => {
@@ -671,12 +793,27 @@ function BarberShop() {
   const handlePhoto = async (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      try { await updateDoc(doc(db, 'barbers', id), { photoUrl: reader.result as string }); }
-      catch (err) { handleFirestoreError(err, OperationType.UPDATE, `barbers/${id}`); }
-    };
-    reader.readAsDataURL(file);
+
+    setAlertModal('Uploading barber photo...');
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('folder', 'barbers');
+
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error('Upload failed');
+      const data = await response.json();
+
+      await updateDoc(doc(db, 'barbers', id), { photoUrl: data.url });
+      setAlertModal('Barber photo updated!');
+    } catch (err) {
+      console.error(err);
+      setAlertModal('Barber photo upload failed.');
+    }
   };
 
   const deleteBarberPhoto = async (id: string) => {
@@ -698,6 +835,74 @@ function BarberShop() {
     try { await updateDoc(doc(db, 'bookings', id), { status: 'missed' }); }
     catch (e) { handleFirestoreError(e, OperationType.UPDATE, `bookings/${id}`); }
   };
+
+  const cancelBooking = async (bookingId: string) => {
+    const booking = bookings.find(b => b.id === bookingId);
+    if (!booking) return;
+
+    const now = new Date();
+    const bookingTime = parseISO(`${booking.date}T${booking.time}`);
+    
+    // Check if it's at least 2 hours before
+    if (isAfter(now, addMinutes(bookingTime, -120))) {
+      setAlertModal(t.cancelTimeLimit);
+      return;
+    }
+
+    setConfirmModal({
+      message: t.cancelBooking + '?',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'bookings', bookingId));
+          setAlertModal(t.cancelSuccess);
+        } catch (e) {
+          handleFirestoreError(e, OperationType.DELETE, `bookings/${bookingId}`);
+        }
+      }
+    });
+  };
+
+  useEffect(() => {
+    const DAYS_ORDER = ['Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    
+    const cleanupInterval = setInterval(async () => {
+      const now = new Date();
+      const currentHour = now.getHours();
+      const currentMinute = now.getMinutes();
+      const todayStr = format(now, 'yyyy-MM-dd');
+
+      // Check if it's 22:00 or later and we haven't cleaned up today
+      if (currentHour >= 22 && settings.lastCleanupDate !== todayStr) {
+        console.log('Starting daily cleanup at 22:00...');
+        
+        try {
+          // 1. Delete bookings for the current day
+          const bookingsToDelete = bookings.filter(b => b.dayName === settings.currentDay || b.date === todayStr);
+          const batch = writeBatch(db);
+          bookingsToDelete.forEach(b => {
+            batch.delete(doc(db, 'bookings', b.id));
+          });
+          
+          // 2. Determine next day
+          const currentIndex = DAYS_ORDER.indexOf(settings.currentDay);
+          const nextIndex = (currentIndex + 1) % DAYS_ORDER.length;
+          const nextDay = DAYS_ORDER[nextIndex];
+
+          // 3. Update settings
+          await updateDoc(doc(db, 'settings', 'global'), {
+            currentDay: nextDay,
+            lastCleanupDate: todayStr
+          });
+          
+          console.log(`Cleanup complete. Switched to ${nextDay}.`);
+        } catch (e) {
+          console.error('Cleanup failed:', e);
+        }
+      }
+    }, 30000); // Check every 30 seconds
+
+    return () => clearInterval(cleanupInterval);
+  }, [settings.currentDay, settings.lastCleanupDate, bookings]);
 
   const deleteBooking = async (id: string) => {
     setConfirmModal({
@@ -728,32 +933,48 @@ function BarberShop() {
     const file = e.target.files?.[0];
     if (!file) return;
     
-    if (!file.type.startsWith('video/')) {
-      setAlertModal('Please upload a video file');
+    const isVideo = file.type.startsWith('video/');
+    const isImage = file.type.startsWith('image/');
+
+    if (!isVideo && !isImage) {
+      setAlertModal('Please upload a video or image file');
       return;
     }
 
     if (file.size > 1000 * 1024 * 1024) { // 1000MB limit
-      setAlertModal('Video must be smaller than 1000MB.');
+      setAlertModal('File must be smaller than 1000MB.');
       return;
     }
 
-    setAlertModal('Uploading video... Please wait.');
+    setAlertModal('Uploading... Please wait.');
     
     try {
-      const storageRef = ref(storage, `gallery/${Date.now()}_${file.name}`);
-      const snapshot = await uploadBytes(storageRef, file);
-      const downloadURL = await getDownloadURL(snapshot.ref);
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('folder', 'gallery');
+
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Upload failed');
+      }
+
+      const data = await response.json();
       
       await addDoc(collection(db, 'gallery'), {
-        url: downloadURL,
-        storagePath: storageRef.fullPath,
+        url: data.url,
+        storagePath: data.storagePath,
+        type: isVideo ? 'video' : 'image',
         createdAt: serverTimestamp()
       });
-      setAlertModal('Video uploaded successfully!');
-    } catch (err) {
-      console.error(err);
-      setAlertModal('Upload failed. Please check your connection and try again.');
+      setAlertModal('Uploaded successfully!');
+    } catch (err: any) {
+      console.error('Gallery upload error details:', err);
+      setAlertModal(`Upload failed: ${err.message || 'Unknown error'}`);
     }
   };
 
@@ -764,8 +985,11 @@ function BarberShop() {
       onConfirm: async () => {
         try {
           if (video?.storagePath) {
-            const storageRef = ref(storage, video.storagePath);
-            await deleteObject(storageRef).catch(e => console.error('Storage delete failed:', e));
+            await fetch('/api/delete', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ storagePath: video.storagePath }),
+            }).catch(e => console.error('Storage delete failed:', e));
           }
           await deleteDoc(doc(db, 'gallery', id));
         } catch (e) { handleFirestoreError(e, OperationType.DELETE, `gallery/${id}`); }
@@ -1138,6 +1362,58 @@ function BarberShop() {
                       ))}
                     </div>
 
+                    {/* Shop Videos Section */}
+                    <div className="mt-12">
+                      <div className="flex items-center justify-between mb-6">
+                        <h3 className="text-xl font-black uppercase tracking-widest text-gold-500">{t.ourVideos}</h3>
+                        {(userRole === 'admin' || userRole === 'manager') && (
+                          <label className="cursor-pointer flex items-center gap-2 px-4 py-2 bg-gold-500 text-black rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all">
+                            <Video size={16} />
+                            {t.uploadVideo}
+                            <input type="file" accept="video/*,image/*" className="hidden" onChange={handleShopVideoUpload} />
+                          </label>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                        {shopVideos.map((video) => (
+                          <motion.div 
+                            key={video.id} 
+                            whileHover={{ scale: 1.05 }}
+                            className="aspect-[9/16] bg-white/5 rounded-2xl border border-white/10 overflow-hidden relative group/shop-video shadow-2xl"
+                          >
+                            {video.type === 'image' ? (
+                              <img src={video.url} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            ) : (
+                              <video 
+                                src={video.url} 
+                                className="w-full h-full object-cover" 
+                                loop 
+                                muted 
+                                playsInline 
+                                controls
+                                onMouseOver={e => e.currentTarget.play()} 
+                                onMouseOut={e => e.currentTarget.pause()} 
+                              />
+                            )}
+                            {(userRole === 'admin' || userRole === 'manager') && (
+                              <button 
+                                onClick={() => deleteShopVideo(video.id)}
+                                className="absolute top-2 right-2 p-2 bg-red-600 text-white rounded-full z-10"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
+                          </motion.div>
+                        ))}
+                        {shopVideos.length === 0 && (
+                          <div className="col-span-full py-12 bg-white/5 border border-dashed border-white/10 rounded-3xl text-center">
+                            <Video className="mx-auto text-white/10 mb-2" size={32} />
+                            <p className="text-[10px] text-white/20 uppercase font-black tracking-widest">No videos uploaded yet</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
                     {/* Gallery Section */}
                     <div className="mt-12">
                       <div className="flex items-center justify-between mb-6">
@@ -1146,23 +1422,31 @@ function BarberShop() {
                           <label className="cursor-pointer flex items-center gap-2 px-4 py-2 bg-gold-500 text-black rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all">
                             <Video size={16} />
                             {t.uploadVideo}
-                            <input type="file" accept="video/*" className="hidden" onChange={handleVideoUpload} />
+                            <input type="file" accept="video/*,image/*" className="hidden" onChange={handleVideoUpload} />
                           </label>
                         )}
                       </div>
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                         {galleryVideos.map((video) => (
-                          <div key={video.id} className="aspect-[9/16] bg-white/5 rounded-2xl border border-white/10 overflow-hidden relative group/video shadow-xl">
-                            <video 
-                              src={video.url} 
-                              className="w-full h-full object-cover" 
-                              loop 
-                              muted 
-                              playsInline 
-                              controls
-                              onMouseOver={e => e.currentTarget.play()} 
-                              onMouseOut={e => e.currentTarget.pause()} 
-                            />
+                          <motion.div 
+                            key={video.id} 
+                            whileHover={{ scale: 1.05 }}
+                            className="aspect-[9/16] bg-white/5 rounded-2xl border border-white/10 overflow-hidden relative group/video shadow-xl"
+                          >
+                            {video.type === 'image' ? (
+                              <img src={video.url} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            ) : (
+                              <video 
+                                src={video.url} 
+                                className="w-full h-full object-cover" 
+                                loop 
+                                muted 
+                                playsInline 
+                                controls
+                                onMouseOver={e => e.currentTarget.play()} 
+                                onMouseOut={e => e.currentTarget.pause()} 
+                              />
+                            )}
                             {(userRole === 'admin' || userRole === 'manager') && (
                               <button 
                                 onClick={() => deleteVideo(video.id)}
@@ -1171,7 +1455,7 @@ function BarberShop() {
                                 <Trash2 size={14} />
                               </button>
                             )}
-                          </div>
+                          </motion.div>
                         ))}
                       </div>
                     </div>
@@ -1235,24 +1519,37 @@ function BarberShop() {
                                       <CheckCircle2 size={22} className="text-emerald-400" />
                                     ) : b.status === 'missed' ? (
                                       <XCircle size={22} className="text-red-400" />
-                                    ) : (userRole !== 'client') && (
+                                    ) : (
                                       <div className="flex items-center gap-2">
-                                        <motion.button 
-                                          whileTap={{ scale: 0.9 }} 
-                                          onClick={() => completeBooking(b.id)} 
-                                          className="p-2 bg-emerald-500/10 text-emerald-400 rounded-xl hover:bg-emerald-500/20 transition-colors border border-emerald-500/20" 
-                                          title="Complete"
-                                        >
-                                          <CheckCircle2 size={18} />
-                                        </motion.button>
-                                        <motion.button 
-                                          whileTap={{ scale: 0.9 }} 
-                                          onClick={() => markAsMissed(b.id)} 
-                                          className="p-2 bg-red-500/10 text-red-400 rounded-xl hover:bg-red-500/20 transition-colors border border-red-500/20" 
-                                          title="Mark as Missed/Late"
-                                        >
-                                          <X size={18} />
-                                        </motion.button>
+                                        {userRole !== 'client' ? (
+                                          <>
+                                            <motion.button 
+                                              whileTap={{ scale: 0.9 }} 
+                                              onClick={() => completeBooking(b.id)} 
+                                              className="p-2 bg-emerald-500/10 text-emerald-400 rounded-xl hover:bg-emerald-500/20 transition-colors border border-emerald-500/20" 
+                                              title="Complete"
+                                            >
+                                              <CheckCircle2 size={18} />
+                                            </motion.button>
+                                            <motion.button 
+                                              whileTap={{ scale: 0.9 }} 
+                                              onClick={() => markAsMissed(b.id)} 
+                                              className="p-2 bg-red-500/10 text-red-400 rounded-xl hover:bg-red-500/20 transition-colors border border-red-500/20" 
+                                              title="Mark as Missed/Late"
+                                            >
+                                              <X size={18} />
+                                            </motion.button>
+                                          </>
+                                        ) : (
+                                          <motion.button 
+                                            whileTap={{ scale: 0.9 }} 
+                                            onClick={() => cancelBooking(b.id)} 
+                                            className="p-2 bg-red-500/10 text-red-400 rounded-xl hover:bg-red-500/20 transition-colors border border-red-500/20" 
+                                            title={t.cancelBooking}
+                                          >
+                                            <X size={18} />
+                                          </motion.button>
+                                        )}
                                       </div>
                                     )}
                                   </div>
@@ -1297,10 +1594,16 @@ function BarberShop() {
                               </div>
                             </div>
                             <div className="flex items-center gap-3">
-                              {b.status === 'completed' ? <CheckCircle2 size={20} className="text-emerald-400" /> : b.status === 'missed' ? <XCircle size={20} className="text-red-400" /> : (userRole !== 'client') && (
+                              {b.status === 'completed' ? <CheckCircle2 size={20} className="text-emerald-400" /> : b.status === 'missed' ? <XCircle size={20} className="text-red-400" /> : (
                                 <div className="flex items-center gap-2">
-                                  <motion.button whileTap={{ scale: 0.9 }} onClick={() => completeBooking(b.id)} className="p-2.5 bg-emerald-500/10 text-emerald-400 rounded-2xl hover:bg-emerald-500/20 transition-colors" title="Complete"><CheckCircle2 size={20} /></motion.button>
-                                  <motion.button whileTap={{ scale: 0.9 }} onClick={() => markAsMissed(b.id)} className="p-2.5 bg-red-500/10 text-red-400 rounded-2xl hover:bg-red-500/20 transition-colors" title="Mark as Missed/Late"><X size={20} /></motion.button>
+                                  {userRole !== 'client' ? (
+                                    <>
+                                      <motion.button whileTap={{ scale: 0.9 }} onClick={() => completeBooking(b.id)} className="p-2.5 bg-emerald-500/10 text-emerald-400 rounded-2xl hover:bg-emerald-500/20 transition-colors" title="Complete"><CheckCircle2 size={20} /></motion.button>
+                                      <motion.button whileTap={{ scale: 0.9 }} onClick={() => markAsMissed(b.id)} className="p-2.5 bg-red-500/10 text-red-400 rounded-2xl hover:bg-red-500/20 transition-colors" title="Mark as Missed/Late"><X size={20} /></motion.button>
+                                    </>
+                                  ) : (
+                                    <motion.button whileTap={{ scale: 0.9 }} onClick={() => cancelBooking(b.id)} className="p-2.5 bg-red-500/10 text-red-400 rounded-2xl hover:bg-red-500/20 transition-colors" title={t.cancelBooking}><X size={20} /></motion.button>
+                                  )}
                                 </div>
                               )}
                               {userRole === 'admin' && (
@@ -1431,10 +1734,16 @@ function BarberShop() {
                               </div>
                             </div>
                             <div className="flex items-center gap-2">
-                              {b.status === 'completed' ? <CheckCircle2 size={16} className="text-emerald-400" /> : b.status === 'missed' ? <XCircle size={16} className="text-red-400" /> : (userRole !== 'client' && (userRole !== 'worker' || workerId === barber.id)) && (
+                              {b.status === 'completed' ? <CheckCircle2 size={16} className="text-emerald-400" /> : b.status === 'missed' ? <XCircle size={16} className="text-red-400" /> : (
                                 <div className="flex items-center gap-1.5">
-                                  <motion.button whileTap={{ scale: 0.9 }} onClick={() => completeBooking(b.id)} className="p-1.5 bg-emerald-500/10 text-emerald-400 rounded-xl hover:bg-emerald-500/20 transition-colors" title="Complete"><CheckCircle2 size={16} /></motion.button>
-                                  <motion.button whileTap={{ scale: 0.9 }} onClick={() => markAsMissed(b.id)} className="p-1.5 bg-red-500/10 text-red-400 rounded-xl hover:bg-red-500/20 transition-colors" title="Mark as Missed/Late"><X size={16} /></motion.button>
+                                  {userRole !== 'client' && (userRole !== 'worker' || workerId === barber.id) ? (
+                                    <>
+                                      <motion.button whileTap={{ scale: 0.9 }} onClick={() => completeBooking(b.id)} className="p-1.5 bg-emerald-500/10 text-emerald-400 rounded-xl hover:bg-emerald-500/20 transition-colors" title="Complete"><CheckCircle2 size={16} /></motion.button>
+                                      <motion.button whileTap={{ scale: 0.9 }} onClick={() => markAsMissed(b.id)} className="p-1.5 bg-red-500/10 text-red-400 rounded-xl hover:bg-red-500/20 transition-colors" title="Mark as Missed/Late"><X size={16} /></motion.button>
+                                    </>
+                                  ) : userRole === 'client' && (
+                                    <motion.button whileTap={{ scale: 0.9 }} onClick={() => cancelBooking(b.id)} className="p-1.5 bg-red-500/10 text-red-400 rounded-xl hover:bg-red-500/20 transition-colors" title={t.cancelBooking}><X size={16} /></motion.button>
+                                  )}
                                 </div>
                               )}
                               {userRole === 'admin' && (

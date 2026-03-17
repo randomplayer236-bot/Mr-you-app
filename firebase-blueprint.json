@@ -33,16 +33,31 @@
       "type": "object",
       "properties": {
         "currentDay": { "type": "string" },
-        "isOpen": { "type": "boolean" }
+        "isOpen": { "type": "boolean" },
+        "lastCleanupDate": { "type": "string" }
       }
     },
-    "GalleryVideo": {
-      "title": "GalleryVideo",
-      "description": "A video in the shop gallery",
+    "ShopVideo": {
+      "title": "ShopVideo",
+      "description": "A video in the 'Our Videos' section",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
         "url": { "type": "string" },
+        "storagePath": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "url"]
+    },
+    "GalleryVideo": {
+      "title": "GalleryVideo",
+      "description": "A video or image in the shop gallery",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "url": { "type": "string" },
+        "storagePath": { "type": "string" },
+        "type": { "type": "string", "enum": ["video", "image"] },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "url"]
@@ -64,6 +79,14 @@
     "/gallery/{videoId}": {
       "schema": "GalleryVideo",
       "description": "Collection of gallery videos"
+    },
+    "/shop_videos/{videoId}": {
+      "schema": "ShopVideo",
+      "description": "Videos for the 'Our Videos' section"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "Real-time notifications for barbers"
     }
   }
 }
