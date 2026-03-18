@@ -32,7 +32,9 @@ import {
   Droplets,
   Video,
   Link as LinkIcon,
-  Save
+  Save,
+  ExternalLink,
+  Download
 } from 'lucide-react';
 import { 
   collection, 
@@ -246,6 +248,29 @@ const TRANSLATIONS = {
   }
 };
 
+const InAppBrowserBanner = () => (
+  <motion.div
+    initial={{ y: -100 }}
+    animate={{ y: 0 }}
+    className="fixed top-0 left-0 right-0 z-[100] bg-gold-500 text-black p-4 shadow-2xl flex items-center justify-between"
+  >
+    <div className="flex items-center gap-3">
+      <div className="bg-black/20 p-2 rounded-lg">
+        <ExternalLink size={20} />
+      </div>
+      <div>
+        <p className="font-black text-xs uppercase tracking-tight">Open in External Browser</p>
+        <p className="text-[10px] font-medium opacity-80">Instagram/Facebook browsers don't support direct installation.</p>
+      </div>
+    </div>
+    <div className="flex items-center gap-2">
+      <div className="text-[10px] font-bold bg-black/10 px-2 py-1 rounded border border-black/10">
+        Tap ... or Share → Open in Browser
+      </div>
+    </div>
+  </motion.div>
+);
+
 function BarberShop() {
   const [lang, setLang] = useState<'en' | 'fr' | 'ar'>('fr');
   const [userRole, setUserRole] = useState<Role>('client');
@@ -379,6 +404,7 @@ function BarberShop() {
   const [showInstallButton, setShowInstallButton] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
+  const [isInAppBrowser, setIsInAppBrowser] = useState(false);
   const [clientName, setClientName] = useState('');
   const [bookingTime, setBookingTime] = useState('');
   const [bookingDate, setBookingDate] = useState(format(new Date(), 'yyyy-MM-dd'));
@@ -448,17 +474,24 @@ function BarberShop() {
     }, (e) => handleFirestoreError(e, OperationType.GET, 'notifications'));
 
     const unsubS = onSnapshot(doc(db, 'settings', 'global'), (snap) => {
+      const defaultLogo = 'https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=400&h=400&fit=crop&q=80';
+      const defaultPhotos = [
+        'https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=800&q=80',
+        'https://images.unsplash.com/photo-1621605815841-2dddb39709a2?w=800&q=80',
+        'https://images.unsplash.com/photo-1599351431247-f13b283253c9?w=800&q=80'
+      ];
+
       if (snap.exists()) {
         const data = snap.data();
         setSettings({
           currentDay: data.currentDay || 'Thursday',
-          logoUrl: data.logoUrl || '',
-          shopPhotos: data.shopPhotos || ['', '', ''],
-          vipPhotoUrl: data.vipPhotoUrl || '',
+          logoUrl: data.logoUrl || defaultLogo,
+          shopPhotos: (data.shopPhotos && data.shopPhotos.some((p: string) => p)) ? data.shopPhotos : defaultPhotos,
+          vipPhotoUrl: data.vipPhotoUrl || 'https://images.unsplash.com/photo-1512690196252-741d2fd36ad0?w=800&q=80',
           lastCleanupDate: data.lastCleanupDate || ''
         });
         
-        const currentLogo = data.logoUrl || 'https://storage.googleapis.com/m-ai-studio/m-ai-studio-public/attachments/67d6e647-86c4-4b55-8774-60e0a516087d.png';
+        const currentLogo = data.logoUrl || defaultLogo;
         
         const link = document.querySelector("link[rel~='icon']") || document.createElement('link');
         (link as HTMLLinkElement).rel = 'icon';
@@ -532,6 +565,11 @@ function BarberShop() {
     const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
     setIsIOS(isIOSDevice);
 
+    // Check for In-App Browsers (Instagram, Facebook, etc.)
+    const ua = navigator.userAgent || navigator.vendor || (window as any).opera;
+    const isInsideApp = (ua.indexOf('FBAN') > -1) || (ua.indexOf('FBAV') > -1) || (ua.indexOf('Instagram') > -1) || (ua.indexOf('Threads') > -1);
+    setIsInAppBrowser(isInsideApp);
+
     const handleBeforeInstallPrompt = (e: any) => {
       console.log('beforeinstallprompt event fired');
       e.preventDefault();
@@ -567,6 +605,11 @@ function BarberShop() {
   const [installProgress, setInstallProgress] = useState(0);
 
   const handleInstallClick = async () => {
+    if (isInAppBrowser) {
+      setAlertModal('You are inside an in-app browser (Instagram/Facebook). To install: Tap the three dots (...) or the "Share" icon and select "Open in Browser" (Safari or Chrome) first.');
+      return;
+    }
+
     if (deferredPrompt) {
       try {
         await deferredPrompt.prompt();
@@ -580,24 +623,23 @@ function BarberShop() {
               setInstallProgress(100);
               clearInterval(interval);
               setTimeout(() => {
-                setDeferredPrompt(null);
-                setShowInstallButton(false);
                 setIsInstalling(false);
-              }, 500);
+                setShowInstallButton(false);
+                setIsStandalone(true);
+              }, 1000);
             } else {
               setInstallProgress(progress);
             }
-          }, 150);
+          }, 200);
         }
+        setDeferredPrompt(null);
       } catch (err) {
-        console.error('Installation prompt failed:', err);
+        console.error('Install prompt failed:', err);
       }
     } else if (isIOS) {
-      setAlertModal('To install: Tap the "Share" button at the bottom of Safari and select "Add to Home Screen".');
+      setAlertModal('To install on iPhone: Tap the "Share" icon (square with arrow) at the bottom and select "Add to Home Screen".');
     } else {
-      // If deferredPrompt is null, the browser might still be checking PWA criteria
-      // We'll try to trigger the native menu if possible
-      setAlertModal('The app is finalizing its setup. Please try again in 2 seconds, or use the browser menu (three dots) and select "Install App".');
+      setAlertModal('To install: Open your browser menu (three dots or lines) and select "Install App" or "Add to Home Screen".');
     }
   };
 
@@ -688,23 +730,28 @@ function BarberShop() {
 
   const clearDay = async () => {
     setConfirmModal({
-      message: `Are you sure you want to clear ALL bookings? This will delete all client names.`,
+      message: `Are you sure you want to clear bookings for TODAY and PAST days? Future bookings will be kept.`,
       onConfirm: async () => {
         try {
+          const today = format(new Date(), 'yyyy-MM-dd');
           const snap = await getDocs(collection(db, 'bookings'));
           let batch = writeBatch(db);
           let count = 0;
           for (const d of snap.docs) {
-            batch.delete(d.ref);
-            count++;
-            if (count === 500) {
-              await batch.commit();
-              batch = writeBatch(db);
-              count = 0;
+            const b = d.data() as Booking;
+            // Only delete if date is today or in the past
+            if (b.date <= today) {
+              batch.delete(d.ref);
+              count++;
+              if (count === 500) {
+                await batch.commit();
+                batch = writeBatch(db);
+                count = 0;
+              }
             }
           }
           if (count > 0) await batch.commit();
-          setAlertModal('All bookings cleared successfully');
+          setAlertModal('Today\'s and past bookings cleared successfully. Future bookings preserved.');
         } catch (e) { handleFirestoreError(e, OperationType.DELETE, 'bookings'); }
       }
     });
@@ -1225,6 +1272,7 @@ function BarberShop() {
           </div>
         </div>
       </header>
+      {isInAppBrowser && <InAppBrowserBanner />}
 
       <AnimatePresence>
         {showInstallButton && userRole === 'client' && !isStandalone && (
@@ -1234,35 +1282,35 @@ function BarberShop() {
             exit={{ y: 100, opacity: 0 }}
             className="fixed bottom-24 left-4 right-4 z-[100]"
           >
-            <div className="bg-gold-500 rounded-2xl p-4 shadow-2xl shadow-gold-500/20 border border-white/20 relative overflow-hidden">
+            <div className="bg-gold-500 rounded-2xl p-5 shadow-2xl shadow-gold-500/40 border-2 border-white/30 relative overflow-hidden group">
               {isInstalling && (
                 <motion.div 
                   initial={{ width: 0 }}
                   animate={{ width: `${installProgress}%` }}
-                  className="absolute top-0 left-0 h-1 bg-black/30 z-0"
+                  className="absolute bottom-0 left-0 h-1.5 bg-black/40 z-0"
                 />
               )}
               
               <div className="flex items-center justify-between relative z-10">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-black rounded-xl flex items-center justify-center">
-                    <Scissors size={20} className="text-gold-500" />
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-black rounded-2xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
+                    <Download size={24} className="text-gold-500" />
                   </div>
                   <div>
-                    <p className="text-xs font-black text-black uppercase tracking-tight">
-                      {isInstalling ? 'Installing MR YOU...' : (isIOS ? 'Install MR YOU on iPhone' : 'Install MR YOU App')}
+                    <p className="text-sm font-black text-black uppercase tracking-tighter leading-none mb-1">
+                      {isInstalling ? 'Installing MR YOU...' : (isIOS ? 'Install on iPhone' : 'Get App on Phone')}
                     </p>
-                    <p className="text-[10px] text-black/60 font-bold">
-                      {isInstalling ? `${Math.round(installProgress)}% completed` : (isIOS ? 'Tap Share > Add to Home Screen' : 'Ready to install on your phone')}
+                    <p className="text-[10px] text-black/70 font-bold uppercase tracking-widest">
+                      {isInstalling ? `${Math.round(installProgress)}% completed` : (isIOS ? 'Tap Share > Add to Home Screen' : 'One-click install')}
                     </p>
                   </div>
                 </div>
                 {!isInstalling && (
                   <button
                     onClick={handleInstallClick}
-                    className="px-4 py-2 bg-black text-gold-500 rounded-lg text-[10px] font-black uppercase tracking-widest active:scale-95 transition-transform"
+                    className="px-6 py-3 bg-black text-gold-500 rounded-xl text-xs font-black uppercase tracking-widest active:scale-95 transition-all shadow-xl hover:shadow-black/20"
                   >
-                    {isIOS ? 'How?' : 'Install'}
+                    {isIOS ? 'Guide' : 'Install Now'}
                   </button>
                 )}
               </div>
@@ -1270,9 +1318,9 @@ function BarberShop() {
               {!isInstalling && (
                 <button 
                   onClick={() => setShowInstallButton(false)}
-                  className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center shadow-lg"
+                  className="absolute top-2 right-2 w-6 h-6 bg-black/10 text-black/40 hover:text-black rounded-full flex items-center justify-center transition-colors"
                 >
-                  <X size={12} />
+                  <X size={14} />
                 </button>
               )}
             </div>
