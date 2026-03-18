@@ -46,6 +46,7 @@ import {
   orderBy, 
   limit,
   addDoc, 
+  getDocs,
   serverTimestamp,
   writeBatch
 } from 'firebase/firestore';
@@ -687,14 +688,23 @@ function BarberShop() {
 
   const clearDay = async () => {
     setConfirmModal({
-      message: `Are you sure you want to clear all bookings for ${settings.currentDay}? This will delete all client names.`,
+      message: `Are you sure you want to clear ALL bookings? This will delete all client names.`,
       onConfirm: async () => {
         try {
-          const batch = writeBatch(db);
-          bookings
-            .filter(b => b.dayName === settings.currentDay || (!b.dayName && format(parseISO(b.date), 'EEEE') === settings.currentDay))
-            .forEach(b => batch.delete(doc(db, 'bookings', b.id)));
-          await batch.commit();
+          const snap = await getDocs(collection(db, 'bookings'));
+          let batch = writeBatch(db);
+          let count = 0;
+          for (const d of snap.docs) {
+            batch.delete(d.ref);
+            count++;
+            if (count === 500) {
+              await batch.commit();
+              batch = writeBatch(db);
+              count = 0;
+            }
+          }
+          if (count > 0) await batch.commit();
+          setAlertModal('All bookings cleared successfully');
         } catch (e) { handleFirestoreError(e, OperationType.DELETE, 'bookings'); }
       }
     });
