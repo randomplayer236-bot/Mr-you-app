@@ -40,6 +40,8 @@ async function startServer() {
     const app = express();
     const PORT = 3000;
 
+    console.log("NODE_ENV:", process.env.NODE_ENV);
+
     // Logging middleware - MUST BE FIRST
     app.use((req, res, next) => {
       console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
@@ -126,25 +128,27 @@ async function startServer() {
       }
     });
 
-    // API 404 handler - prevents falling through to Vite for missing API routes
-    app.use("/api/*all", (req, res) => {
+    // API 404 handler
+    app.use("/api", (req, res) => {
       res.status(404).json({ error: `API route not found: ${req.method} ${req.originalUrl}` });
     });
-    app.use("/server-api/*all", (req, res) => {
+    app.use("/server-api", (req, res) => {
       res.status(404).json({ error: `API route not found: ${req.method} ${req.originalUrl}` });
     });
 
     // Vite middleware for development
     if (process.env.NODE_ENV !== "production") {
+      console.log("Starting Vite in middleware mode...");
       const vite = await createViteServer({
         server: { middlewareMode: true },
         appType: "spa",
       });
       app.use(vite.middlewares);
     } else {
+      console.log("Serving static files from dist...");
       const distPath = path.join(process.cwd(), 'dist');
       app.use(express.static(distPath));
-      app.get('*all', (req, res) => {
+      app.get('*', (req, res) => {
         res.sendFile(path.join(distPath, 'index.html'));
       });
     }

@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+console.log("App.tsx module loading...");
+
 import React, { useState, useEffect, useMemo, Component } from 'react';
 import type { ReactNode, ErrorInfo } from 'react';
 import { 
@@ -34,6 +36,7 @@ import {
   collection, 
   onSnapshot, 
   doc, 
+  getDoc,
   setDoc, 
   updateDoc, 
   deleteDoc, 
@@ -44,8 +47,9 @@ import {
   serverTimestamp,
   writeBatch
 } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
 import { db, auth } from './firebase';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { format, addMinutes, isAfter, parseISO } from 'date-fns';
@@ -101,69 +105,6 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   };
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
-}
-
-interface ErrorBoundaryProps {
-  children: React.ReactNode;
-}
-
-interface ErrorBoundaryState {
-  hasError: boolean;
-  error: any;
-}
-
-// --- Error Boundary ---
-class ErrorBoundary extends (Component as any) {
-  constructor(props: any) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-  static getDerivedStateFromError(error: any) { return { hasError: true, error }; }
-  componentDidCatch(error: any, info: any) { 
-    console.error("ErrorBoundary caught an error:", error, info); 
-  }
-  render() {
-    if (this.state.hasError) {
-      const errorMsg = this.state.error?.message || String(this.state.error);
-      const isQuotaError = errorMsg.toLowerCase().includes('quota exceeded') || 
-                          errorMsg.toLowerCase().includes('quota');
-      
-      return (
-        <div className="min-h-screen bg-black flex items-center justify-center p-6 text-center">
-          <div className="max-w-md w-full space-y-6">
-            <div className="w-20 h-20 bg-red-500/10 rounded-full flex items-center justify-center mx-auto border border-red-500/20">
-              <AlertCircle className="text-red-500" size={40} />
-            </div>
-            <div className="space-y-2">
-              <h2 className="text-2xl font-serif italic text-white">
-                {isQuotaError ? "Service Temporarily Unavailable" : "Something went wrong"}
-              </h2>
-              <p className="text-white/40 text-sm">
-                {isQuotaError 
-                  ? "The daily free limit for the database has been reached. It will reset tomorrow at midnight."
-                  : "We encountered an unexpected error. Please try refreshing the page."}
-              </p>
-            </div>
-            <button 
-              onClick={() => window.location.reload()}
-              className="bg-gold-500 text-black px-8 py-3 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-gold-400 transition-colors shadow-lg shadow-gold-500/20"
-            >
-              Refresh Page
-            </button>
-            <div className="pt-8 border-t border-white/5">
-              <p className="text-[10px] text-white/10 uppercase tracking-widest mb-2">Error Details</p>
-              <div className="bg-white/5 p-4 rounded-xl text-left overflow-auto max-h-40 custom-scrollbar">
-                <code className="text-[10px] text-red-400/60 break-all leading-relaxed">
-                  {errorMsg}
-                </code>
-              </div>
-            </div>
-          </div>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
 }
 
 // --- Types ---
@@ -338,6 +279,31 @@ function BarberShop() {
 
   const t = TRANSLATIONS[lang];
   const isRtl = lang === 'ar';
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          const userDoc = await getDoc(doc(db, 'users', user.uid));
+          if (userDoc.exists()) {
+            const data = userDoc.data();
+            setUserRole(data.role || 'client');
+            setWorkerId(data.barberId || null);
+          } else {
+            setUserRole('client');
+            setWorkerId(null);
+          }
+        } catch (e) {
+          console.error("Auth user doc fetch failed:", e);
+          setUserRole('client');
+        }
+      } else {
+        setUserRole('client');
+        setWorkerId(null);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     const qB = query(collection(db, 'barbers'), orderBy('order'));
@@ -2045,11 +2011,6 @@ function BarberShop() {
 
 export default function App() { 
   return (
-    <ErrorBoundary>
-      <div style={{ background: 'red', color: 'white', padding: '10px', position: 'fixed', top: 0, left: 0, zIndex: 9999, fontSize: '10px' }}>
-        DEBUG: App Mounted
-      </div>
-      <BarberShop />
-    </ErrorBoundary>
+    <BarberShop />
   ); 
 }

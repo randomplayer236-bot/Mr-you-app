@@ -39,7 +39,24 @@
     </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div style="color: white; background: black; height: 100vh; display: flex; align-items: center; justify-content: center; font-family: sans-serif;">
+        <div style="text-align: center;">
+          <h1 style="color: #d4af37; font-size: 2rem; letter-spacing: 0.2em; font-weight: 300;">MR YOU</h1>
+          <div id="debug-info" style="font-size: 10px; margin-top: 20px; color: #333;">
+            Loading...
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>
+      // Immediate error catching
+      window.onerror = function(msg, url, line, col, error) {
+        document.getElementById('debug-info').innerHTML = 'Error: ' + msg + ' at ' + line + ':' + col;
+        document.getElementById('debug-info').style.color = '#ff4444';
+        return false;
+      };
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
