@@ -730,17 +730,19 @@ function BarberShop() {
 
   const clearDay = async () => {
     setConfirmModal({
-      message: `Are you sure you want to clear bookings for TODAY and PAST days? Future bookings will be kept.`,
+      message: `Are you sure you want to clear all bookings for ${settings.currentDay}?`,
       onConfirm: async () => {
         try {
-          const today = format(new Date(), 'yyyy-MM-dd');
           const snap = await getDocs(collection(db, 'bookings'));
           let batch = writeBatch(db);
           let count = 0;
           for (const d of snap.docs) {
             const b = d.data() as Booking;
-            // Only delete if date is today or in the past
-            if (b.date <= today) {
+            // Only delete if dayName matches currentDay or date corresponds to currentDay
+            const matchesDay = b.dayName === settings.currentDay || 
+                             (!b.dayName && b.date && format(parseISO(b.date), 'EEEE') === settings.currentDay);
+            
+            if (matchesDay) {
               batch.delete(d.ref);
               count++;
               if (count === 500) {
@@ -751,7 +753,7 @@ function BarberShop() {
             }
           }
           if (count > 0) await batch.commit();
-          setAlertModal('Today\'s and past bookings cleared successfully. Future bookings preserved.');
+          setAlertModal(`All bookings for ${settings.currentDay} cleared successfully.`);
         } catch (e) { handleFirestoreError(e, OperationType.DELETE, 'bookings'); }
       }
     });
