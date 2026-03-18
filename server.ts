@@ -39,20 +39,28 @@ async function startServer() {
     
     let bucket = storage.bucket(bucketName);
 
-    // Verify bucket exists, if not try fallback
+    // Verify bucket exists, if not try multiple fallbacks
     try {
       const [exists] = await bucket.exists();
       if (!exists) {
-        console.warn(`Bucket "${bucketName}" does not exist. Trying fallback...`);
-        const fallbackBucket = firebaseConfig.storageBucket;
-        if (fallbackBucket && fallbackBucket !== bucketName) {
-          bucket = storage.bucket(fallbackBucket);
-          const [fallbackExists] = await bucket.exists();
-          if (fallbackExists) {
-            console.log(`Successfully fell back to bucket: ${fallbackBucket}`);
-            bucketName = fallbackBucket;
-          } else {
-            console.error(`Fallback bucket "${fallbackBucket}" also does not exist.`);
+        console.warn(`Bucket "${bucketName}" does not exist. Trying fallbacks...`);
+        
+        const fallbacks = [
+          firebaseConfig.storageBucket,
+          `${firebaseConfig.projectId}.appspot.com`,
+          `${firebaseConfig.projectId}.firebasestorage.app`,
+          firebaseConfig.projectId
+        ].filter(b => b && b !== bucketName);
+
+        for (const fb of fallbacks) {
+          console.log(`Trying fallback bucket: ${fb}`);
+          const tempBucket = storage.bucket(fb);
+          const [fbExists] = await tempBucket.exists();
+          if (fbExists) {
+            console.log(`Successfully found bucket: ${fb}`);
+            bucket = tempBucket;
+            bucketName = fb;
+            break;
           }
         }
       } else {

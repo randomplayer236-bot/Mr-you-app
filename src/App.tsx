@@ -259,7 +259,7 @@ function BarberShop() {
     lastCleanupDate: ''
   });
   const [galleryVideos, setGalleryVideos] = useState<GalleryVideo[]>([]);
-  const [stagedImages, setStagedImages] = useState<{ id: string, data: string, type: 'file' | 'url', folder: string, name: string }[]>([]);
+  const [stagedImages, setStagedImages] = useState<{ id: string, data: string, storagePath?: string, type: 'file' | 'url', folder: string, name: string }[]>([]);
 
   const convertToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -312,6 +312,7 @@ function BarberShop() {
           const newDoc = doc(collection(db, 'gallery'));
           batch.set(newDoc, {
             url: img.data,
+            storagePath: img.storagePath || null,
             createdAt: serverTimestamp(),
             type: img.type === 'url' ? (img.data.match(/\.(mp4|webm|ogg)/i) ? 'video' : 'image') : (img.data.startsWith('data:video') ? 'video' : 'image'),
             name: img.name
@@ -320,6 +321,7 @@ function BarberShop() {
           const newDoc = doc(collection(db, 'shop_videos'));
           batch.set(newDoc, {
             url: img.data,
+            storagePath: img.storagePath || null,
             createdAt: serverTimestamp(),
             type: img.type === 'url' ? (img.data.match(/\.(mp4|webm|ogg)/i) ? 'video' : 'image') : (img.data.startsWith('data:video') ? 'video' : 'image'),
             name: img.name
@@ -348,7 +350,15 @@ function BarberShop() {
     }
   };
 
-  const removeStaged = (id: string) => {
+  const removeStaged = async (id: string) => {
+    const img = stagedImages.find(i => i.id === id);
+    if (img?.storagePath) {
+      await fetch('/server-api/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storagePath: img.storagePath }),
+      }).catch(e => console.error('Storage delete failed:', e));
+    }
     setStagedImages(prev => prev.filter(img => img.id !== id));
   };
 
@@ -758,12 +768,39 @@ function BarberShop() {
       return;
     }
 
-    if (file.size > 800 * 1024) { // 800KB limit for Firestore
-      setAlertModal('File must be smaller than 800KB for Firestore storage.');
-      return;
+    if (isVideo) {
+      if (file.size > 800 * 1024 * 1024) { // 800MB limit
+        setAlertModal('Video must be smaller than 800MB.');
+        return;
+      }
+      setAlertModal('Uploading video to server...');
+      try {
+        const formData = new FormData();
+        formData.append('folder', 'shop_videos');
+        formData.append('file', file);
+        const response = await fetch('/server-api/upload', { method: 'POST', body: formData });
+        if (!response.ok) throw new Error('Upload failed');
+        const data = await response.json();
+        setStagedImages(prev => [...prev, {
+          id: Math.random().toString(36).substring(7),
+          data: data.url,
+          storagePath: data.storagePath,
+          type: 'url',
+          folder: 'shop_videos',
+          name: file.name
+        }]);
+        setAlertModal('Video uploaded and staged! Click "Save All" to finalize.');
+      } catch (err) {
+        console.error(err);
+        setAlertModal('Video upload failed.');
+      }
+    } else {
+      if (file.size > 800 * 1024) {
+        setAlertModal('Image must be smaller than 800KB for Firestore storage.');
+        return;
+      }
+      stageImage(file, 'shop_videos');
     }
-
-    stageImage(file, 'shop_videos');
   };
 
   const deleteShopVideo = async (id: string) => {
@@ -950,12 +987,39 @@ function BarberShop() {
       return;
     }
 
-    if (file.size > 800 * 1024) { // 800KB limit for Firestore
-      setAlertModal('File must be smaller than 800KB for Firestore storage.');
-      return;
+    if (isVideo) {
+      if (file.size > 800 * 1024 * 1024) { // 800MB limit
+        setAlertModal('Video must be smaller than 800MB.');
+        return;
+      }
+      setAlertModal('Uploading video to server...');
+      try {
+        const formData = new FormData();
+        formData.append('folder', 'gallery');
+        formData.append('file', file);
+        const response = await fetch('/server-api/upload', { method: 'POST', body: formData });
+        if (!response.ok) throw new Error('Upload failed');
+        const data = await response.json();
+        setStagedImages(prev => [...prev, {
+          id: Math.random().toString(36).substring(7),
+          data: data.url,
+          storagePath: data.storagePath,
+          type: 'url',
+          folder: 'gallery',
+          name: file.name
+        }]);
+        setAlertModal('Video uploaded and staged! Click "Save All" to finalize.');
+      } catch (err) {
+        console.error(err);
+        setAlertModal('Video upload failed.');
+      }
+    } else {
+      if (file.size > 800 * 1024) {
+        setAlertModal('Image must be smaller than 800KB for Firestore storage.');
+        return;
+      }
+      stageImage(file, 'gallery');
     }
-
-    stageImage(file, 'gallery');
   };
 
   const deleteVideo = async (id: string) => {
