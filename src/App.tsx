@@ -30,7 +30,9 @@ import {
   X,
   Star,
   Droplets,
-  Video
+  Video,
+  Link as LinkIcon,
+  Save
 } from 'lucide-react';
 import { 
   collection, 
@@ -257,6 +259,101 @@ function BarberShop() {
     lastCleanupDate: ''
   });
   const [galleryVideos, setGalleryVideos] = useState<GalleryVideo[]>([]);
+  const [stagedImages, setStagedImages] = useState<{ id: string, data: string, type: 'file' | 'url', folder: string, name: string }[]>([]);
+
+  const convertToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = error => reject(error);
+    });
+  };
+
+  const stageImage = async (file: File | string, folder: string) => {
+    if (typeof file === 'string') {
+      // URL input
+      setStagedImages(prev => [...prev, { 
+        id: Math.random().toString(36).substr(2, 9), 
+        data: file, 
+        type: 'url', 
+        folder,
+        name: 'Remote URL'
+      }]);
+    } else {
+      // File input
+      if (file.size > 800 * 1024) {
+        setAlertModal('File too large! Please keep images under 800KB for Firestore storage.');
+        return;
+      }
+      try {
+        const base64 = await convertToBase64(file);
+        setStagedImages(prev => [...prev, { 
+          id: Math.random().toString(36).substr(2, 9), 
+          data: base64, 
+          type: 'file', 
+          folder,
+          name: file.name
+        }]);
+      } catch (err) {
+        setAlertModal('Failed to convert image to Base64');
+      }
+    }
+  };
+
+  const saveAllStaged = async () => {
+    if (stagedImages.length === 0) return;
+    setAlertModal('Saving all staged images...');
+    try {
+      const batch = writeBatch(db);
+      
+      for (const img of stagedImages) {
+        if (img.folder === 'gallery') {
+          const newDoc = doc(collection(db, 'gallery'));
+          batch.set(newDoc, {
+            url: img.data,
+            createdAt: serverTimestamp(),
+            type: img.type === 'url' ? (img.data.match(/\.(mp4|webm|ogg)/i) ? 'video' : 'image') : (img.data.startsWith('data:video') ? 'video' : 'image'),
+            name: img.name
+          });
+        } else if (img.folder === 'shop_videos') {
+          const newDoc = doc(collection(db, 'shop_videos'));
+          batch.set(newDoc, {
+            url: img.data,
+            createdAt: serverTimestamp(),
+            type: img.type === 'url' ? (img.data.match(/\.(mp4|webm|ogg)/i) ? 'video' : 'image') : (img.data.startsWith('data:video') ? 'video' : 'image'),
+            name: img.name
+          });
+        } else if (img.folder === 'logos') {
+          batch.update(doc(db, 'settings', 'global'), { logoUrl: img.data });
+        } else if (img.folder === 'vip_photos') {
+          batch.update(doc(db, 'settings', 'global'), { vipPhotoUrl: img.data });
+        } else if (img.folder.startsWith('shop_photos_')) {
+          const index = parseInt(img.folder.split('_').pop() || '0');
+          const newPhotos = [...settings.shopPhotos];
+          newPhotos[index] = img.data;
+          batch.update(doc(db, 'settings', 'global'), { shopPhotos: newPhotos });
+        } else if (img.folder.startsWith('barber_photos_')) {
+          const id = img.folder.split('_').pop() || '';
+          batch.update(doc(db, 'barbers', id), { photoUrl: img.data });
+        }
+      }
+      
+      await batch.commit();
+      setStagedImages([]);
+      setAlertModal('All images saved successfully!');
+    } catch (err) {
+      console.error(err);
+      setAlertModal('Failed to save staged images');
+    }
+  };
+
+  const removeStaged = (id: string) => {
+    setStagedImages(prev => prev.filter(img => img.id !== id));
+  };
+
+  const [urlInput, setUrlInput] = useState('');
+  const [showUrlModal, setShowUrlModal] = useState<{ show: boolean, folder: string }>({ show: false, folder: '' });
   const [shopVideos, setShopVideos] = useState<ShopVideo[]>([]);
   const [sessionId] = useState(() => Math.random().toString(36).substring(7));
   const [showWorkers, setShowWorkers] = useState(false);
@@ -603,27 +700,13 @@ function BarberShop() {
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    
-    setAlertModal('Uploading logo...');
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('folder', 'logos');
 
-      const response = await fetch('/server-api/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) throw new Error('Upload failed');
-      const data = await response.json();
-      
-      await updateDoc(doc(db, 'settings', 'global'), { logoUrl: data.url });
-      setAlertModal('Logo updated!');
-    } catch (err) {
-      console.error(err);
-      setAlertModal('Logo upload failed.');
+    if (file.size > 800 * 1024) {
+      setAlertModal('File too large! Please keep images under 800KB.');
+      return;
     }
+    
+    stageImage(file, 'logos');
   };
 
   const deleteLogo = async () => {
@@ -641,28 +724,13 @@ function BarberShop() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setAlertModal('Uploading photo...');
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('folder', 'shop_photos');
-
-      const response = await fetch('/server-api/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) throw new Error('Upload failed');
-      const data = await response.json();
-
-      const newPhotos = [...settings.shopPhotos];
-      newPhotos[index] = data.url;
-      await updateDoc(doc(db, 'settings', 'global'), { shopPhotos: newPhotos });
-      setAlertModal('Photo updated!');
-    } catch (err) {
-      console.error(err);
-      setAlertModal('Photo upload failed.');
+    if (file.size > 800 * 1024) {
+      setAlertModal('File too large! Please keep images under 800KB.');
+      return;
     }
+    
+    // We'll use a special folder name to include the index
+    stageImage(file, `shop_photos_${index}`);
   };
 
   const deleteShopPhoto = async (index: number) => {
@@ -690,36 +758,12 @@ function BarberShop() {
       return;
     }
 
-    setAlertModal('Uploading... Please wait.');
-    
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('folder', 'shop_videos');
-
-      const response = await fetch('/server-api/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Upload failed');
-      }
-
-      const data = await response.json();
-      
-      await addDoc(collection(db, 'shop_videos'), {
-        url: data.url,
-        storagePath: data.storagePath,
-        type: isVideo ? 'video' : 'image',
-        createdAt: serverTimestamp()
-      });
-      setAlertModal('Uploaded successfully!');
-    } catch (err: any) {
-      console.error('Upload error details:', err);
-      setAlertModal(`Upload failed: ${err.message || 'Unknown error'}`);
+    if (file.size > 800 * 1024) { // 800KB limit for Firestore
+      setAlertModal('File must be smaller than 800KB for Firestore storage.');
+      return;
     }
+
+    stageImage(file, 'shop_videos');
   };
 
   const deleteShopVideo = async (id: string) => {
@@ -745,26 +789,12 @@ function BarberShop() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setAlertModal('Uploading VIP photo...');
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('folder', 'vip_photos');
-
-      const response = await fetch('/server-api/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) throw new Error('Upload failed');
-      const data = await response.json();
-
-      await updateDoc(doc(db, 'settings', 'global'), { vipPhotoUrl: data.url });
-      setAlertModal('VIP photo updated!');
-    } catch (err) {
-      console.error(err);
-      setAlertModal('VIP photo upload failed.');
+    if (file.size > 800 * 1024) {
+      setAlertModal('File too large! Please keep images under 800KB.');
+      return;
     }
+
+    stageImage(file, 'vip_photos');
   };
 
   const deleteVipPhoto = async () => {
@@ -787,26 +817,12 @@ function BarberShop() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setAlertModal('Uploading barber photo...');
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('folder', 'barbers');
-
-      const response = await fetch('/server-api/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) throw new Error('Upload failed');
-      const data = await response.json();
-
-      await updateDoc(doc(db, 'barbers', id), { photoUrl: data.url });
-      setAlertModal('Barber photo updated!');
-    } catch (err) {
-      console.error(err);
-      setAlertModal('Barber photo upload failed.');
+    if (file.size > 800 * 1024) {
+      setAlertModal('File too large! Please keep images under 800KB.');
+      return;
     }
+
+    stageImage(file, `barber_photos_${id}`);
   };
 
   const deleteBarberPhoto = async (id: string) => {
@@ -934,41 +950,12 @@ function BarberShop() {
       return;
     }
 
-    if (file.size > 1000 * 1024 * 1024) { // 1000MB limit
-      setAlertModal('File must be smaller than 1000MB.');
+    if (file.size > 800 * 1024) { // 800KB limit for Firestore
+      setAlertModal('File must be smaller than 800KB for Firestore storage.');
       return;
     }
 
-    setAlertModal('Uploading... Please wait.');
-    
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('folder', 'gallery');
-
-      const response = await fetch('/server-api/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Upload failed');
-      }
-
-      const data = await response.json();
-      
-      await addDoc(collection(db, 'gallery'), {
-        url: data.url,
-        storagePath: data.storagePath,
-        type: isVideo ? 'video' : 'image',
-        createdAt: serverTimestamp()
-      });
-      setAlertModal('Uploaded successfully!');
-    } catch (err: any) {
-      console.error('Gallery upload error details:', err);
-      setAlertModal(`Upload failed: ${err.message || 'Unknown error'}`);
-    }
+    stageImage(file, 'gallery');
   };
 
   const deleteVideo = async (id: string) => {
@@ -1365,15 +1352,57 @@ function BarberShop() {
                     <div className="mt-12">
                       <div className="flex items-center justify-between mb-6">
                         <h3 className="text-xl font-black uppercase tracking-widest text-gold-500">{t.ourVideos}</h3>
-                        {(userRole === 'admin' || userRole === 'manager') && (
-                          <label className="cursor-pointer flex items-center gap-2 px-4 py-2 bg-gold-500 text-black rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all">
-                            <Video size={16} />
-                            {t.uploadVideo}
-                            <input type="file" accept="video/*,image/*" className="hidden" onChange={handleShopVideoUpload} />
-                          </label>
+                        {userRole === 'admin' && (
+                          <div className="flex items-center gap-2">
+                            {stagedImages.filter(img => img.folder === 'shop_videos').length > 0 && (
+                              <button 
+                                onClick={saveAllStaged}
+                                className="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all shadow-lg shadow-emerald-500/20"
+                              >
+                                <Save size={16} />
+                                Save All ({stagedImages.filter(img => img.folder === 'shop_videos').length})
+                              </button>
+                            )}
+                            <button 
+                              onClick={() => setShowUrlModal({ show: true, folder: 'shop_videos' })}
+                              className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all shadow-lg shadow-blue-500/20"
+                            >
+                              <LinkIcon size={16} />
+                              Add URL
+                            </button>
+                            <label className="cursor-pointer flex items-center gap-2 px-4 py-2 bg-gold-500 text-black rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all">
+                              <Video size={16} />
+                              {t.uploadVideo}
+                              <input type="file" accept="video/*,image/*" className="hidden" onChange={handleShopVideoUpload} />
+                            </label>
+                          </div>
                         )}
                       </div>
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                        {/* Render Staged Shop Videos */}
+                        {stagedImages.filter(img => img.folder === 'shop_videos').map((img) => (
+                          <motion.div 
+                            key={img.id} 
+                            initial={{ opacity: 0, scale: 0.9 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            className="aspect-[9/16] bg-white/5 rounded-2xl border-2 border-dashed border-gold-500/50 overflow-hidden relative group/staged shadow-2xl"
+                          >
+                            <div className="absolute top-2 left-2 z-20 px-2 py-1 bg-gold-500 text-black text-[8px] font-black uppercase rounded-md animate-pulse">
+                              Pending Save
+                            </div>
+                            {img.data.startsWith('data:image') || img.type === 'url' ? (
+                              <img src={img.data} className="w-full h-full object-cover opacity-50" referrerPolicy="no-referrer" />
+                            ) : (
+                              <video src={img.data} className="w-full h-full object-cover opacity-50" muted />
+                            )}
+                            <button 
+                              onClick={() => removeStaged(img.id)}
+                              className="absolute top-2 right-2 p-2 bg-red-600 text-white rounded-full z-20"
+                            >
+                              <X size={14} />
+                            </button>
+                          </motion.div>
+                        ))}
                         {shopVideos.map((video) => (
                           <motion.div 
                             key={video.id} 
@@ -1394,7 +1423,7 @@ function BarberShop() {
                                 onMouseOut={e => e.currentTarget.pause()} 
                               />
                             )}
-                            {(userRole === 'admin' || userRole === 'manager') && (
+                            {userRole === 'admin' && (
                               <button 
                                 onClick={() => deleteShopVideo(video.id)}
                                 className="absolute top-2 right-2 p-2 bg-red-600 text-white rounded-full z-10"
@@ -1417,15 +1446,57 @@ function BarberShop() {
                     <div className="mt-12">
                       <div className="flex items-center justify-between mb-6">
                         <h3 className="text-xl font-black uppercase tracking-widest text-gold-500">{t.gallery}</h3>
-                        {(userRole === 'admin' || userRole === 'manager') && (
-                          <label className="cursor-pointer flex items-center gap-2 px-4 py-2 bg-gold-500 text-black rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all">
-                            <Video size={16} />
-                            {t.uploadVideo}
-                            <input type="file" accept="video/*,image/*" className="hidden" onChange={handleVideoUpload} />
-                          </label>
+                        {userRole === 'admin' && (
+                          <div className="flex items-center gap-2">
+                            {stagedImages.filter(img => img.folder === 'gallery').length > 0 && (
+                              <button 
+                                onClick={saveAllStaged}
+                                className="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all shadow-lg shadow-emerald-500/20"
+                              >
+                                <Save size={16} />
+                                Save All ({stagedImages.filter(img => img.folder === 'gallery').length})
+                              </button>
+                            )}
+                            <button 
+                              onClick={() => setShowUrlModal({ show: true, folder: 'gallery' })}
+                              className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all shadow-lg shadow-blue-500/20"
+                            >
+                              <LinkIcon size={16} />
+                              Add URL
+                            </button>
+                            <label className="cursor-pointer flex items-center gap-2 px-4 py-2 bg-gold-500 text-black rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all">
+                              <Video size={16} />
+                              {t.uploadVideo}
+                              <input type="file" accept="video/*,image/*" className="hidden" onChange={handleVideoUpload} />
+                            </label>
+                          </div>
                         )}
                       </div>
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                        {/* Render Staged Gallery Videos */}
+                        {stagedImages.filter(img => img.folder === 'gallery').map((img) => (
+                          <motion.div 
+                            key={img.id} 
+                            initial={{ opacity: 0, scale: 0.9 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            className="aspect-[9/16] bg-white/5 rounded-2xl border-2 border-dashed border-gold-500/50 overflow-hidden relative group/staged shadow-2xl"
+                          >
+                            <div className="absolute top-2 left-2 z-20 px-2 py-1 bg-gold-500 text-black text-[8px] font-black uppercase rounded-md animate-pulse">
+                              Pending Save
+                            </div>
+                            {img.data.startsWith('data:image') || img.type === 'url' ? (
+                              <img src={img.data} className="w-full h-full object-cover opacity-50" referrerPolicy="no-referrer" />
+                            ) : (
+                              <video src={img.data} className="w-full h-full object-cover opacity-50" muted />
+                            )}
+                            <button 
+                              onClick={() => removeStaged(img.id)}
+                              className="absolute top-2 right-2 p-2 bg-red-600 text-white rounded-full z-20"
+                            >
+                              <X size={14} />
+                            </button>
+                          </motion.div>
+                        ))}
                         {galleryVideos.map((video) => (
                           <motion.div 
                             key={video.id} 
@@ -1446,7 +1517,7 @@ function BarberShop() {
                                 onMouseOut={e => e.currentTarget.pause()} 
                               />
                             )}
-                            {(userRole === 'admin' || userRole === 'manager') && (
+                            {userRole === 'admin' && (
                               <button 
                                 onClick={() => deleteVideo(video.id)}
                                 className="absolute top-2 right-2 p-2 bg-red-600 text-white rounded-full z-10"
@@ -1904,6 +1975,50 @@ function BarberShop() {
           </div>
         )}
 
+        {showUrlModal.show && (
+          <div key="url-modal" className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-black border border-gold-500/20 p-8 rounded-[2rem] max-w-md w-full shadow-2xl"
+            >
+              <h3 className="text-xl font-black uppercase tracking-widest text-gold-500 mb-6 text-center">Add Image by URL</h3>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-gold-500/60 ml-4">Image or Video URL</label>
+                  <input 
+                    type="text" 
+                    value={urlInput} 
+                    onChange={e => setUrlInput(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 focus:border-gold-500/50 outline-none transition-all text-sm"
+                    placeholder="https://example.com/image.jpg"
+                  />
+                </div>
+                <div className="flex gap-4 pt-4">
+                  <button 
+                    onClick={() => setShowUrlModal({ show: false, folder: '' })}
+                    className="flex-1 py-3 bg-white/5 border border-white/10 rounded-xl font-black uppercase tracking-widest text-[10px]"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={() => {
+                      if (urlInput) {
+                        stageImage(urlInput, showUrlModal.folder);
+                        setUrlInput('');
+                        setShowUrlModal({ show: false, folder: '' });
+                      }
+                    }}
+                    className="flex-1 py-3 bg-gold-500 text-black rounded-xl font-black uppercase tracking-widest text-[10px]"
+                  >
+                    Add to Staged
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
         {showLogin && (
           <div key="login-modal" className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/95 backdrop-blur-2xl" onClick={() => setShowLogin(false)} />
@@ -2003,6 +2118,37 @@ function BarberShop() {
               </div>
             </motion.div>
           </div>
+        )}
+
+        {stagedImages.length > 0 && (
+          <motion.div 
+            initial={{ y: 100 }}
+            animate={{ y: 0 }}
+            className="fixed bottom-8 right-8 z-[150] flex flex-col items-end gap-4"
+          >
+            <div className="bg-black/80 backdrop-blur-xl border border-gold-500/20 p-4 rounded-2xl shadow-2xl flex flex-col gap-2 min-w-[200px]">
+              <p className="text-[10px] font-black uppercase tracking-widest text-gold-500">Staged Items ({stagedImages.length})</p>
+              <div className="max-h-[200px] overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+                {stagedImages.map(img => (
+                  <div key={img.id} className="flex items-center justify-between gap-3 p-2 bg-white/5 rounded-lg border border-white/10">
+                    <div className="flex items-center gap-2 overflow-hidden">
+                      <img src={img.data} className="w-8 h-8 rounded object-cover shrink-0" referrerPolicy="no-referrer" />
+                      <span className="text-[9px] text-white/40 truncate font-bold uppercase tracking-tighter">{img.name}</span>
+                    </div>
+                    <button onClick={() => removeStaged(img.id)} className="text-red-500 hover:text-red-400 p-1">
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <button 
+                onClick={saveAllStaged}
+                className="w-full py-3 bg-emerald-500 text-white rounded-xl font-black uppercase tracking-widest text-[10px] shadow-lg shadow-emerald-500/20 hover:scale-[1.02] transition-all mt-2"
+              >
+                Save All Changes
+              </button>
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

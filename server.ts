@@ -31,11 +31,47 @@ async function startServer() {
       bucketName = firebaseConfig.storageBucket;
     }
 
-    console.log(`Using storage bucket: ${bucketName}`);
+    console.log(`Initial bucket name: ${bucketName}`);
 
-    const storage = new Storage();
-    const bucket = storage.bucket(bucketName);
-    const upload = multer({ storage: multer.memoryStorage() });
+    const storage = new Storage({
+      projectId: firebaseConfig.projectId
+    });
+    
+    let bucket = storage.bucket(bucketName);
+
+    // Verify bucket exists, if not try fallback
+    try {
+      const [exists] = await bucket.exists();
+      if (!exists) {
+        console.warn(`Bucket "${bucketName}" does not exist. Trying fallback...`);
+        const fallbackBucket = firebaseConfig.storageBucket;
+        if (fallbackBucket && fallbackBucket !== bucketName) {
+          bucket = storage.bucket(fallbackBucket);
+          const [fallbackExists] = await bucket.exists();
+          if (fallbackExists) {
+            console.log(`Successfully fell back to bucket: ${fallbackBucket}`);
+            bucketName = fallbackBucket;
+          } else {
+            console.error(`Fallback bucket "${fallbackBucket}" also does not exist.`);
+          }
+        }
+      } else {
+        console.log(`Bucket "${bucketName}" verified.`);
+      }
+    } catch (e) {
+      console.error("Error verifying bucket existence:", e);
+    }
+
+    // Use disk storage for large files to avoid memory issues
+    const upload = multer({ 
+      storage: multer.diskStorage({
+        destination: '/tmp',
+        filename: (req, file, cb) => {
+          cb(null, `${Date.now()}_${file.originalname}`);
+        }
+      }),
+      limits: { fileSize: 1024 * 1024 * 1024 } // 1GB limit
+    });
 
     const app = express();
     const PORT = 3000;
@@ -60,7 +96,7 @@ async function startServer() {
 
     // API Route for Uploads
     app.post("/server-api/upload", upload.single("file"), async (req, res) => {
-      console.log("Received upload request");
+      console.log(`Received upload request for bucket: ${bucket.name}`);
       try {
         if (!req.file) {
           console.error("No file in request");
@@ -92,6 +128,13 @@ async function startServer() {
             console.warn("Could not make file public, URL might be restricted:", e);
           }
           
+          // Clean up temp file
+          if (req.file?.path) {
+            fs.unlink(req.file.path, (err) => {
+              if (err) console.error("Error deleting temp file:", err);
+            });
+          }
+
           const publicUrl = `https://storage.googleapis.com/${bucket.name}/${blob.name}`;
           console.log(`File available at: ${publicUrl}`);
           res.status(200).json({ 
@@ -100,9 +143,15 @@ async function startServer() {
           });
         });
 
-        blobStream.end(req.file.buffer);
+        fs.createReadStream(req.file.path).pipe(blobStream);
       } catch (error: any) {
         console.error("Server Upload Error:", error);
+        // Clean up temp file on error
+        if (req.file?.path) {
+          fs.unlink(req.file.path, (err) => {
+            if (err) console.error("Error deleting temp file on error:", err);
+          });
+        }
         if (!res.headersSent) {
           res.status(500).json({ error: error.message });
         }
