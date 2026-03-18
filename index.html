@@ -29,6 +29,18 @@
     <link rel="apple-touch-icon" id="apple-icon" href="https://storage.googleapis.com/m-ai-studio/m-ai-studio-public/attachments/67d6e647-86c4-4b55-8774-60e0a516087d.png" />
     <title>MR YOU</title>
     <script>
+      // Suppress benign Vite WebSocket errors in AI Studio environment
+      window.addEventListener('unhandledrejection', function(event) {
+        if (event.reason && (
+          event.reason.message === 'WebSocket closed without opened.' ||
+          (typeof event.reason === 'string' && event.reason.includes('failed to connect to websocket'))
+        )) {
+          event.preventDefault();
+          // Log as warning instead of error to keep console cleaner
+          console.warn('Suppressed benign Vite HMR error:', event.reason);
+        }
+      });
+
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
           navigator.serviceWorker.register('/sw.js')
