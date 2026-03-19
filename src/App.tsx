@@ -24,14 +24,11 @@ import {
   ShieldCheck,
   AlertCircle,
   Camera,
-  Image as ImageIcon,
   Upload,
   Bell,
   X,
   Star,
   Droplets,
-  Video,
-  Link as LinkIcon,
   Save,
   ExternalLink,
   Download
@@ -128,8 +125,6 @@ interface Barber {
   activeSessionId?: string;
   lastActive?: any;
 }
-interface GalleryVideo { id: string; url: string; storagePath?: string; type: 'video' | 'image'; createdAt: any; }
-interface ShopVideo { id: string; url: string; storagePath?: string; type: 'video' | 'image'; createdAt: any; }
 interface Booking { 
   id: string; 
   barberId: string; 
@@ -175,13 +170,7 @@ const TRANSLATIONS = {
     kick: 'Kick',
     unban: 'Unban',
     unbannedSection: 'Unbanned Section',
-    gallery: 'Gallery',
-    uploadVideo: 'Upload Video',
     kickedMessage: 'You have been kicked from the shop. Access denied.',
-    cancelBooking: 'Cancel Booking',
-    cancelSuccess: 'Booking cancelled successfully.',
-    cancelTimeLimit: 'You can only cancel at least 2 hours before the appointment.',
-    ourVideos: 'Our Videos',
     barbers: 'Barbers'
   },
   fr: {
@@ -206,13 +195,7 @@ const TRANSLATIONS = {
     kick: 'Renvoyer',
     unban: 'Réintégrer',
     unbannedSection: 'Section des bannis',
-    gallery: 'Galerie',
-    uploadVideo: 'Télécharger Vidéo',
     kickedMessage: 'Vous avez été renvoyé du salon. Accès refusé.',
-    cancelBooking: 'Annuler la réservation',
-    cancelSuccess: 'Réservation annulée avec succès.',
-    cancelTimeLimit: 'Vous ne pouvez annuler qu\'au moins 2 heures avant le rendez-vous.',
-    ourVideos: 'Nos Vidéos',
     barbers: 'Barbiers'
   },
   ar: {
@@ -237,13 +220,7 @@ const TRANSLATIONS = {
     kick: 'طرد',
     unban: 'إلغاء الحظر',
     unbannedSection: 'قسم المحظورين',
-    gallery: 'المعرض',
-    uploadVideo: 'رفع فيديو',
     kickedMessage: 'لقد تم طردك من المحل. تم رفض الوصول.',
-    cancelBooking: 'إلغاء الحجز',
-    cancelSuccess: 'تم إلغاء الحجز بنجاح.',
-    cancelTimeLimit: 'يمكنك الإلغاء قبل ساعتين على الأقل من الموعد.',
-    ourVideos: 'فيديوهاتنا',
     barbers: 'الحلاقين'
   }
 };
@@ -280,11 +257,9 @@ function BarberShop() {
   const [settings, setSettings] = useState({ 
     currentDay: 'Thursday', 
     logoUrl: '', 
-    shopPhotos: ['', '', ''], 
     vipPhotoUrl: '',
     lastCleanupDate: ''
   });
-  const [galleryVideos, setGalleryVideos] = useState<GalleryVideo[]>([]);
   const [stagedImages, setStagedImages] = useState<{ id: string, data: string, storagePath?: string, type: 'file' | 'url', folder: string, name: string }[]>([]);
 
   const convertToBase64 = (file: File): Promise<string> => {
@@ -334,33 +309,10 @@ function BarberShop() {
       const batch = writeBatch(db);
       
       for (const img of stagedImages) {
-        if (img.folder === 'gallery') {
-          const newDoc = doc(collection(db, 'gallery'));
-          batch.set(newDoc, {
-            url: img.data,
-            storagePath: img.storagePath || null,
-            createdAt: serverTimestamp(),
-            type: img.type === 'url' ? (img.data.match(/\.(mp4|webm|ogg)/i) ? 'video' : 'image') : (img.data.startsWith('data:video') ? 'video' : 'image'),
-            name: img.name
-          });
-        } else if (img.folder === 'shop_videos') {
-          const newDoc = doc(collection(db, 'shop_videos'));
-          batch.set(newDoc, {
-            url: img.data,
-            storagePath: img.storagePath || null,
-            createdAt: serverTimestamp(),
-            type: img.type === 'url' ? (img.data.match(/\.(mp4|webm|ogg)/i) ? 'video' : 'image') : (img.data.startsWith('data:video') ? 'video' : 'image'),
-            name: img.name
-          });
-        } else if (img.folder === 'logos') {
+        if (img.folder === 'logos') {
           batch.update(doc(db, 'settings', 'global'), { logoUrl: img.data });
         } else if (img.folder === 'vip_photos') {
           batch.update(doc(db, 'settings', 'global'), { vipPhotoUrl: img.data });
-        } else if (img.folder.startsWith('shop_photos_')) {
-          const index = parseInt(img.folder.split('_').pop() || '0');
-          const newPhotos = [...settings.shopPhotos];
-          newPhotos[index] = img.data;
-          batch.update(doc(db, 'settings', 'global'), { shopPhotos: newPhotos });
         } else if (img.folder.startsWith('barber_photos_')) {
           const id = img.folder.split('_').pop() || '';
           batch.update(doc(db, 'barbers', id), { photoUrl: img.data });
@@ -388,9 +340,6 @@ function BarberShop() {
     setStagedImages(prev => prev.filter(img => img.id !== id));
   };
 
-  const [urlInput, setUrlInput] = useState('');
-  const [showUrlModal, setShowUrlModal] = useState<{ show: boolean, folder: string }>({ show: false, folder: '' });
-  const [shopVideos, setShopVideos] = useState<ShopVideo[]>([]);
   const [sessionId] = useState(() => Math.random().toString(36).substring(7));
   const [showWorkers, setShowWorkers] = useState(false);
   const [showPersonalBarbers, setShowPersonalBarbers] = useState(false);
@@ -444,21 +393,49 @@ function BarberShop() {
     const unsubB = onSnapshot(qB, (snap) => {
       const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Barber));
       
-      // Ensure "MR you" shop entry exists
-      const hasShop = data.some(b => b.isShop);
-      if (data.length > 0 && !hasShop) {
-        addDoc(collection(db, 'barbers'), { name: 'MR you', status: 'available', order: 0, isShop: true })
-          .catch(e => handleFirestoreError(e, OperationType.WRITE, 'barbers'));
-      }
+      // Ensure exactly 8 barbers + 1 shop entry
+      const shop = data.find(b => b.isShop);
+      const workers = data.filter(b => !b.isShop).sort((a, b) => a.order - b.order);
 
       if (data.length === 0) {
         const batch = writeBatch(db);
-        // Add Shop Main
         batch.set(doc(collection(db, 'barbers')), { name: 'MR you', status: 'available', order: 0, isShop: true });
         for (let i = 1; i <= 8; i++) {
           batch.set(doc(collection(db, 'barbers')), { name: `Barber n.o${i}`, status: 'unavailable', order: i });
         }
         batch.commit().catch(e => handleFirestoreError(e, OperationType.WRITE, 'barbers'));
+      } else {
+        // If shop missing, add it
+        if (!shop) {
+          addDoc(collection(db, 'barbers'), { name: 'MR you', status: 'available', order: 0, isShop: true })
+            .catch(e => handleFirestoreError(e, OperationType.WRITE, 'barbers'));
+        }
+
+        // If not exactly 8 workers, or orders are wrong, fix it
+        const hasCorrectWorkers = workers.length === 8 && workers.every((w, i) => w.order === i + 1);
+        if (!hasCorrectWorkers && data.length > 0) {
+          const batch = writeBatch(db);
+          
+          // Identify which orders are missing
+          const existingOrders = new Set(workers.map(w => w.order));
+          for (let i = 1; i <= 8; i++) {
+            if (!existingOrders.has(i)) {
+              batch.set(doc(collection(db, 'barbers')), { name: `Barber n.o${i}`, status: 'unavailable', order: i });
+            }
+          }
+          
+          // Remove duplicates or extras
+          const seenOrders = new Set();
+          workers.forEach(w => {
+            if (w.order < 1 || w.order > 8 || seenOrders.has(w.order)) {
+              batch.delete(doc(db, 'barbers', w.id));
+            } else {
+              seenOrders.add(w.order);
+            }
+          });
+          
+          batch.commit().catch(e => handleFirestoreError(e, OperationType.WRITE, 'barbers'));
+        }
       }
       setBarbers(data);
     }, (e) => handleFirestoreError(e, OperationType.GET, 'barbers'));
@@ -475,18 +452,12 @@ function BarberShop() {
 
     const unsubS = onSnapshot(doc(db, 'settings', 'global'), (snap) => {
       const defaultLogo = 'https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=400&h=400&fit=crop&q=80';
-      const defaultPhotos = [
-        'https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=800&q=80',
-        'https://images.unsplash.com/photo-1621605815841-2dddb39709a2?w=800&q=80',
-        'https://images.unsplash.com/photo-1599351431247-f13b283253c9?w=800&q=80'
-      ];
 
       if (snap.exists()) {
         const data = snap.data();
         setSettings({
           currentDay: data.currentDay || 'Thursday',
           logoUrl: data.logoUrl || defaultLogo,
-          shopPhotos: (data.shopPhotos && data.shopPhotos.some((p: string) => p)) ? data.shopPhotos : defaultPhotos,
           vipPhotoUrl: data.vipPhotoUrl || 'https://images.unsplash.com/photo-1512690196252-741d2fd36ad0?w=800&q=80',
           lastCleanupDate: data.lastCleanupDate || ''
         });
@@ -504,24 +475,13 @@ function BarberShop() {
         setDoc(doc(db, 'settings', 'global'), { 
           currentDay: 'Thursday', 
           logoUrl: '', 
-          shopPhotos: ['', '', ''],
           lastCleanupDate: ''
         })
           .catch(e => handleFirestoreError(e, OperationType.WRITE, 'settings/global'));
       }
     }, (e) => handleFirestoreError(e, OperationType.GET, 'settings/global'));
 
-    const qG = query(collection(db, 'gallery'), orderBy('createdAt', 'desc'), limit(20));
-    const unsubG = onSnapshot(qG, (snap) => {
-      setGalleryVideos(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as GalleryVideo)));
-    }, (e) => handleFirestoreError(e, OperationType.GET, 'gallery'));
-
-    const qSV = query(collection(db, 'shop_videos'), orderBy('createdAt', 'desc'), limit(10));
-    const unsubSV = onSnapshot(qSV, (snap) => {
-      setShopVideos(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as ShopVideo)));
-    }, (e) => handleFirestoreError(e, OperationType.GET, 'shop_videos'));
-
-    return () => { unsubB(); unsubBk(); unsubN(); unsubS(); unsubG(); unsubSV(); };
+    return () => { unsubB(); unsubBk(); unsubN(); unsubS(); };
   }, []);
 
   useEffect(() => {
@@ -627,25 +587,32 @@ function BarberShop() {
     const { name, password } = loginForm;
     if (name === 'sam' && password === 'sam2006') { setUserRole('admin'); setShowLogin(false); }
     else if (name === 'manager' && password === 'manager1234') { setUserRole('manager'); setShowLogin(false); }
-    else if (name === 'worker' && password.startsWith('worker')) {
+    else if (password.startsWith('worker')) {
       const num = parseInt(password.replace('worker', ''));
       if (num >= 1 && num <= 8) {
         const barber = barbers.find(b => b.order === num);
-        if (barber?.isKicked) {
-          setAlertModal(t.kickedMessage);
-          return;
-        }
+        // Allow login with 'worker' or the barber's specific name
+        if (barber && (name === 'worker' || name === barber.name)) {
+          if (barber.isKicked) {
+            setAlertModal(t.kickedMessage);
+            return;
+          }
 
-        try {
-          await updateDoc(doc(db, 'barbers', barber!.id), { 
-            lastActive: serverTimestamp()
-          });
-          setUserRole('worker');
-          setWorkerId(barber?.id || null);
-          setShowLogin(false);
-        } catch (e) {
-          handleFirestoreError(e, OperationType.UPDATE, `barbers/${barber?.id}`);
+          try {
+            await updateDoc(doc(db, 'barbers', barber.id), { 
+              lastActive: serverTimestamp()
+            });
+            setUserRole('worker');
+            setWorkerId(barber.id);
+            setShowLogin(false);
+          } catch (e) {
+            handleFirestoreError(e, OperationType.UPDATE, `barbers/${barber.id}`);
+          }
+        } else {
+          setAlertModal('Invalid credentials');
         }
+      } else {
+        setAlertModal('Invalid credentials');
       }
     } else { setAlertModal('Invalid credentials'); }
   };
@@ -750,98 +717,6 @@ function BarberShop() {
         try {
           await updateDoc(doc(db, 'settings', 'global'), { logoUrl: '' });
         } catch (e) { handleFirestoreError(e, OperationType.UPDATE, 'settings/global'); }
-      }
-    });
-  };
-
-  const handleShopPhoto = async (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (file.size > 800 * 1024) {
-      setAlertModal('File too large! Please keep images under 800KB.');
-      return;
-    }
-    
-    // We'll use a special folder name to include the index
-    stageImage(file, `shop_photos_${index}`);
-  };
-
-  const deleteShopPhoto = async (index: number) => {
-    setConfirmModal({
-      message: 'Delete this shop photo?',
-      onConfirm: async () => {
-        const newPhotos = [...settings.shopPhotos];
-        newPhotos[index] = '';
-        try {
-          await updateDoc(doc(db, 'settings', 'global'), { shopPhotos: newPhotos });
-        } catch (e) { handleFirestoreError(e, OperationType.UPDATE, 'settings/global'); }
-      }
-    });
-  };
-
-  const handleShopVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    
-    const isVideo = file.type.startsWith('video/');
-    const isImage = file.type.startsWith('image/');
-
-    if (!isVideo && !isImage) {
-      setAlertModal('Please upload a video or image file');
-      return;
-    }
-
-    if (isVideo) {
-      if (file.size > 800 * 1024 * 1024) { // 800MB limit
-        setAlertModal('Video must be smaller than 800MB.');
-        return;
-      }
-      setAlertModal('Uploading video to server...');
-      try {
-        const formData = new FormData();
-        formData.append('folder', 'shop_videos');
-        formData.append('file', file);
-        const response = await fetch('/server-api/upload', { method: 'POST', body: formData });
-        if (!response.ok) throw new Error('Upload failed');
-        const data = await response.json();
-        setStagedImages(prev => [...prev, {
-          id: Math.random().toString(36).substring(7),
-          data: data.url,
-          storagePath: data.storagePath,
-          type: 'url',
-          folder: 'shop_videos',
-          name: file.name
-        }]);
-        setAlertModal('Video uploaded and staged! Click "Save All" to finalize.');
-      } catch (err) {
-        console.error(err);
-        setAlertModal('Video upload failed.');
-      }
-    } else {
-      if (file.size > 800 * 1024) {
-        setAlertModal('Image must be smaller than 800KB for Firestore storage.');
-        return;
-      }
-      stageImage(file, 'shop_videos');
-    }
-  };
-
-  const deleteShopVideo = async (id: string) => {
-    const video = shopVideos.find(v => v.id === id);
-    setConfirmModal({
-      message: 'Delete this item?',
-      onConfirm: async () => {
-        try {
-          if (video?.storagePath) {
-            await fetch('/server-api/delete', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ storagePath: video.storagePath }),
-            }).catch(console.error);
-          }
-          await deleteDoc(doc(db, 'shop_videos', id));
-        } catch (e) { handleFirestoreError(e, OperationType.DELETE, `shop_videos/${id}`); }
       }
     });
   };
@@ -997,72 +872,6 @@ function BarberShop() {
   const unbanBarber = async (id: string) => {
     try { await updateDoc(doc(db, 'barbers', id), { isKicked: false }); }
     catch (e) { handleFirestoreError(e, OperationType.UPDATE, `barbers/${id}`); }
-  };
-
-  const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    
-    const isVideo = file.type.startsWith('video/');
-    const isImage = file.type.startsWith('image/');
-
-    if (!isVideo && !isImage) {
-      setAlertModal('Please upload a video or image file');
-      return;
-    }
-
-    if (isVideo) {
-      if (file.size > 800 * 1024 * 1024) { // 800MB limit
-        setAlertModal('Video must be smaller than 800MB.');
-        return;
-      }
-      setAlertModal('Uploading video to server...');
-      try {
-        const formData = new FormData();
-        formData.append('folder', 'gallery');
-        formData.append('file', file);
-        const response = await fetch('/server-api/upload', { method: 'POST', body: formData });
-        if (!response.ok) throw new Error('Upload failed');
-        const data = await response.json();
-        setStagedImages(prev => [...prev, {
-          id: Math.random().toString(36).substring(7),
-          data: data.url,
-          storagePath: data.storagePath,
-          type: 'url',
-          folder: 'gallery',
-          name: file.name
-        }]);
-        setAlertModal('Video uploaded and staged! Click "Save All" to finalize.');
-      } catch (err) {
-        console.error(err);
-        setAlertModal('Video upload failed.');
-      }
-    } else {
-      if (file.size > 800 * 1024) {
-        setAlertModal('Image must be smaller than 800KB for Firestore storage.');
-        return;
-      }
-      stageImage(file, 'gallery');
-    }
-  };
-
-  const deleteVideo = async (id: string) => {
-    const video = galleryVideos.find(v => v.id === id);
-    setConfirmModal({
-      message: 'Delete this video?',
-      onConfirm: async () => {
-        try {
-          if (video?.storagePath) {
-            await fetch('/server-api/delete', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ storagePath: video.storagePath }),
-            }).catch(e => console.error('Storage delete failed:', e));
-          }
-          await deleteDoc(doc(db, 'gallery', id));
-        } catch (e) { handleFirestoreError(e, OperationType.DELETE, `gallery/${id}`); }
-      }
-    });
   };
 
   const clearNotifications = async () => {
@@ -1284,6 +1093,86 @@ function BarberShop() {
       </AnimatePresence>
 
       <main className="max-w-7xl mx-auto px-4 py-8 sm:py-12">
+        {isIOS && !isStandalone && (
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-black/40 backdrop-blur-md border border-gold-500/20 rounded-3xl p-6 mb-12 overflow-hidden relative group"
+          >
+            <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+              <Download size={80} className="text-gold-500" />
+            </div>
+            
+            <div className="relative z-10">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-10 h-10 bg-gold-500 rounded-xl flex items-center justify-center shadow-lg shadow-gold-500/20">
+                  <Download size={20} className="text-black" />
+                </div>
+                <h3 className="text-lg font-black uppercase tracking-widest text-gold-500">Install MR You</h3>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                {/* English */}
+                <div className="space-y-3">
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gold-500/40">English</p>
+                  <div className="space-y-2">
+                    <div className="flex items-start gap-3">
+                      <span className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-[10px] font-bold shrink-0">1</span>
+                      <p className="text-xs text-white/70">Open this app in <span className="text-white font-bold">Safari</span> browser</p>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <span className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-[10px] font-bold shrink-0">2</span>
+                      <p className="text-xs text-white/70">Tap the <span className="text-white font-bold">Share</span> button (square with arrow)</p>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <span className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-[10px] font-bold shrink-0">3</span>
+                      <p className="text-xs text-white/70">Select <span className="text-white font-bold">"Add to Home Screen"</span></p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* French */}
+                <div className="space-y-3">
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gold-500/40">Français</p>
+                  <div className="space-y-2">
+                    <div className="flex items-start gap-3">
+                      <span className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-[10px] font-bold shrink-0">1</span>
+                      <p className="text-xs text-white/70">Ouvrez cette application dans <span className="text-white font-bold">Safari</span></p>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <span className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-[10px] font-bold shrink-0">2</span>
+                      <p className="text-xs text-white/70">Appuyez sur le bouton <span className="text-white font-bold">Partager</span> (carré avec flèche)</p>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <span className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-[10px] font-bold shrink-0">3</span>
+                      <p className="text-xs text-white/70">Sélectionnez <span className="text-white font-bold">"Sur l'écran d'accueil"</span></p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Arabic */}
+                <div className="space-y-3 text-right" dir="rtl">
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gold-500/40">العربية</p>
+                  <div className="space-y-2">
+                    <div className="flex items-start gap-3 flex-row-reverse">
+                      <span className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-[10px] font-bold shrink-0">١</span>
+                      <p className="text-xs text-white/70">افتح هذا التطبيق في متصفح <span className="text-white font-bold">Safari</span></p>
+                    </div>
+                    <div className="flex items-start gap-3 flex-row-reverse">
+                      <span className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-[10px] font-bold shrink-0">٢</span>
+                      <p className="text-xs text-white/70">اضغط على زر <span className="text-white font-bold">المشاركة</span> (المربع مع السهم)</p>
+                    </div>
+                    <div className="flex items-start gap-3 flex-row-reverse">
+                      <span className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-[10px] font-bold shrink-0">٣</span>
+                      <p className="text-xs text-white/70">اختر <span className="text-white font-bold">"إضافة إلى الشاشة الرئيسية"</span></p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
         {/* Hero Section */}
         <motion.section 
           initial={{ opacity: 0, scale: 0.95 }}
@@ -1395,218 +1284,7 @@ function BarberShop() {
                         </div>
                       </div>
                     </div>
-                    <div className="grid grid-cols-3 gap-3 sm:gap-6">
-                      {settings.shopPhotos.map((photo, idx) => (
-                        <motion.div 
-                          key={idx} 
-                          whileHover={{ scale: 1.05, rotate: idx % 2 === 0 ? 1 : -1 }}
-                          className="aspect-[4/5] bg-white/5 rounded-[2rem] border border-white/10 overflow-hidden relative group/shop-photo shadow-2xl"
-                        >
-                          {photo ? (
-                            <img src={photo} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center">
-                              <ImageIcon className="text-white/5" size={32} />
-                            </div>
-                          )}
-                          {(userRole === 'admin' || userRole === 'manager') && (
-                            <div className="absolute inset-0 bg-black/80 opacity-0 group-hover/shop-photo:opacity-100 flex flex-col items-center justify-center transition-all duration-300 gap-4 backdrop-blur-sm">
-                              <label className="cursor-pointer p-3 bg-gold-500 text-black rounded-full hover:scale-110 transition-transform shadow-xl">
-                                <Upload size={20} /><input type="file" accept="image/*" className="hidden" onChange={(e) => handleShopPhoto(idx, e)} />
-                              </label>
-                              {photo && (
-                                <button onClick={() => deleteShopPhoto(idx)} className="p-3 bg-red-600 text-white rounded-full hover:scale-110 transition-transform shadow-xl">
-                                  <Trash2 size={20} />
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </motion.div>
-                      ))}
-                    </div>
-
-                    {/* Shop Videos Section */}
-                    <div className="mt-12">
-                      <div className="flex items-center justify-between mb-6">
-                        <h3 className="text-xl font-black uppercase tracking-widest text-gold-500">{t.ourVideos}</h3>
-                        {userRole === 'admin' && (
-                          <div className="flex items-center gap-2">
-                            {stagedImages.filter(img => img.folder === 'shop_videos').length > 0 && (
-                              <button 
-                                onClick={saveAllStaged}
-                                className="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all shadow-lg shadow-emerald-500/20"
-                              >
-                                <Save size={16} />
-                                Save All ({stagedImages.filter(img => img.folder === 'shop_videos').length})
-                              </button>
-                            )}
-                            <button 
-                              onClick={() => setShowUrlModal({ show: true, folder: 'shop_videos' })}
-                              className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all shadow-lg shadow-blue-500/20"
-                            >
-                              <LinkIcon size={16} />
-                              Add URL
-                            </button>
-                            <label className="cursor-pointer flex items-center gap-2 px-4 py-2 bg-gold-500 text-black rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all">
-                              <Video size={16} />
-                              {t.uploadVideo}
-                              <input type="file" accept="video/*,image/*" className="hidden" onChange={handleShopVideoUpload} />
-                            </label>
-                          </div>
-                        )}
-                      </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                        {/* Render Staged Shop Videos */}
-                        {stagedImages.filter(img => img.folder === 'shop_videos').map((img) => (
-                          <motion.div 
-                            key={img.id} 
-                            initial={{ opacity: 0, scale: 0.9 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            className="aspect-[9/16] bg-white/5 rounded-2xl border-2 border-dashed border-gold-500/50 overflow-hidden relative group/staged shadow-2xl"
-                          >
-                            <div className="absolute top-2 left-2 z-20 px-2 py-1 bg-gold-500 text-black text-[8px] font-black uppercase rounded-md animate-pulse">
-                              Pending Save
-                            </div>
-                            {img.data.startsWith('data:image') || img.type === 'url' ? (
-                              <img src={img.data} className="w-full h-full object-cover opacity-50" referrerPolicy="no-referrer" />
-                            ) : (
-                              <video src={img.data} className="w-full h-full object-cover opacity-50" muted />
-                            )}
-                            <button 
-                              onClick={() => removeStaged(img.id)}
-                              className="absolute top-2 right-2 p-2 bg-red-600 text-white rounded-full z-20"
-                            >
-                              <X size={14} />
-                            </button>
-                          </motion.div>
-                        ))}
-                        {shopVideos.map((video) => (
-                          <motion.div 
-                            key={video.id} 
-                            whileHover={{ scale: 1.05 }}
-                            className="aspect-[9/16] bg-white/5 rounded-2xl border border-white/10 overflow-hidden relative group/shop-video shadow-2xl"
-                          >
-                            {video.type === 'image' ? (
-                              <img src={video.url} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                            ) : (
-                              <video 
-                                src={video.url} 
-                                className="w-full h-full object-cover" 
-                                loop 
-                                muted 
-                                playsInline 
-                                controls
-                                onMouseOver={e => e.currentTarget.play()} 
-                                onMouseOut={e => e.currentTarget.pause()} 
-                              />
-                            )}
-                            {userRole === 'admin' && (
-                              <button 
-                                onClick={() => deleteShopVideo(video.id)}
-                                className="absolute top-2 right-2 p-2 bg-red-600 text-white rounded-full z-10"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            )}
-                          </motion.div>
-                        ))}
-                        {shopVideos.length === 0 && (
-                          <div className="col-span-full py-12 bg-white/5 border border-dashed border-white/10 rounded-3xl text-center">
-                            <Video className="mx-auto text-white/10 mb-2" size={32} />
-                            <p className="text-[10px] text-white/20 uppercase font-black tracking-widest">No videos uploaded yet</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Gallery Section */}
-                    <div className="mt-12">
-                      <div className="flex items-center justify-between mb-6">
-                        <h3 className="text-xl font-black uppercase tracking-widest text-gold-500">{t.gallery}</h3>
-                        {userRole === 'admin' && (
-                          <div className="flex items-center gap-2">
-                            {stagedImages.filter(img => img.folder === 'gallery').length > 0 && (
-                              <button 
-                                onClick={saveAllStaged}
-                                className="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all shadow-lg shadow-emerald-500/20"
-                              >
-                                <Save size={16} />
-                                Save All ({stagedImages.filter(img => img.folder === 'gallery').length})
-                              </button>
-                            )}
-                            <button 
-                              onClick={() => setShowUrlModal({ show: true, folder: 'gallery' })}
-                              className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all shadow-lg shadow-blue-500/20"
-                            >
-                              <LinkIcon size={16} />
-                              Add URL
-                            </button>
-                            <label className="cursor-pointer flex items-center gap-2 px-4 py-2 bg-gold-500 text-black rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all">
-                              <Video size={16} />
-                              {t.uploadVideo}
-                              <input type="file" accept="video/*,image/*" className="hidden" onChange={handleVideoUpload} />
-                            </label>
-                          </div>
-                        )}
-                      </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                        {/* Render Staged Gallery Videos */}
-                        {stagedImages.filter(img => img.folder === 'gallery').map((img) => (
-                          <motion.div 
-                            key={img.id} 
-                            initial={{ opacity: 0, scale: 0.9 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            className="aspect-[9/16] bg-white/5 rounded-2xl border-2 border-dashed border-gold-500/50 overflow-hidden relative group/staged shadow-2xl"
-                          >
-                            <div className="absolute top-2 left-2 z-20 px-2 py-1 bg-gold-500 text-black text-[8px] font-black uppercase rounded-md animate-pulse">
-                              Pending Save
-                            </div>
-                            {img.data.startsWith('data:image') || img.type === 'url' ? (
-                              <img src={img.data} className="w-full h-full object-cover opacity-50" referrerPolicy="no-referrer" />
-                            ) : (
-                              <video src={img.data} className="w-full h-full object-cover opacity-50" muted />
-                            )}
-                            <button 
-                              onClick={() => removeStaged(img.id)}
-                              className="absolute top-2 right-2 p-2 bg-red-600 text-white rounded-full z-20"
-                            >
-                              <X size={14} />
-                            </button>
-                          </motion.div>
-                        ))}
-                        {galleryVideos.map((video) => (
-                          <motion.div 
-                            key={video.id} 
-                            whileHover={{ scale: 1.05 }}
-                            className="aspect-[9/16] bg-white/5 rounded-2xl border border-white/10 overflow-hidden relative group/video shadow-xl"
-                          >
-                            {video.type === 'image' ? (
-                              <img src={video.url} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                            ) : (
-                              <video 
-                                src={video.url} 
-                                className="w-full h-full object-cover" 
-                                loop 
-                                muted 
-                                playsInline 
-                                controls
-                                onMouseOver={e => e.currentTarget.play()} 
-                                onMouseOut={e => e.currentTarget.pause()} 
-                              />
-                            )}
-                            {userRole === 'admin' && (
-                              <button 
-                                onClick={() => deleteVideo(video.id)}
-                                className="absolute top-2 right-2 p-2 bg-red-600 text-white rounded-full z-10"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            )}
-                          </motion.div>
-                        ))}
-                      </div>
-                    </div>
-
+                    
                     {/* Planning en direct (Live Schedule) */}
                     <div className="mt-16">
                       <div className="flex items-center justify-between mb-8">
@@ -2048,50 +1726,6 @@ function BarberShop() {
               >
                 OK
               </button>
-            </motion.div>
-          </div>
-        )}
-
-        {showUrlModal.show && (
-          <div key="url-modal" className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="bg-black border border-gold-500/20 p-8 rounded-[2rem] max-w-md w-full shadow-2xl"
-            >
-              <h3 className="text-xl font-black uppercase tracking-widest text-gold-500 mb-6 text-center">Add Image by URL</h3>
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black uppercase tracking-widest text-gold-500/60 ml-4">Image or Video URL</label>
-                  <input 
-                    type="text" 
-                    value={urlInput} 
-                    onChange={e => setUrlInput(e.target.value)}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 focus:border-gold-500/50 outline-none transition-all text-sm"
-                    placeholder="https://example.com/image.jpg"
-                  />
-                </div>
-                <div className="flex gap-4 pt-4">
-                  <button 
-                    onClick={() => setShowUrlModal({ show: false, folder: '' })}
-                    className="flex-1 py-3 bg-white/5 border border-white/10 rounded-xl font-black uppercase tracking-widest text-[10px]"
-                  >
-                    Cancel
-                  </button>
-                  <button 
-                    onClick={() => {
-                      if (urlInput) {
-                        stageImage(urlInput, showUrlModal.folder);
-                        setUrlInput('');
-                        setShowUrlModal({ show: false, folder: '' });
-                      }
-                    }}
-                    className="flex-1 py-3 bg-gold-500 text-black rounded-xl font-black uppercase tracking-widest text-[10px]"
-                  >
-                    Add to Staged
-                  </button>
-                </div>
-              </div>
             </motion.div>
           </div>
         )}
