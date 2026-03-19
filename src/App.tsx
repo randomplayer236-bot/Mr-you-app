@@ -587,59 +587,24 @@ function BarberShop() {
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     window.addEventListener('appinstalled', handleAppInstalled);
 
-    // For iOS or if the event doesn't fire, we show the button after a short delay
-    const timer = setTimeout(() => {
-      if (!isStandaloneMode) {
-        setShowInstallButton(true);
-      }
-    }, 3000);
-
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       window.removeEventListener('appinstalled', handleAppInstalled);
-      clearTimeout(timer);
     };
-  }, [deferredPrompt]);
-
-  const [isInstalling, setIsInstalling] = useState(false);
-  const [installProgress, setInstallProgress] = useState(0);
+  }, []);
 
   const handleInstallClick = async () => {
-    if (isInAppBrowser) {
-      setAlertModal('You are inside an in-app browser (Instagram/Facebook). To install: Tap the three dots (...) or the "Share" icon and select "Open in Browser" (Safari or Chrome) first.');
-      return;
-    }
+    if (!deferredPrompt) return;
 
-    if (deferredPrompt) {
-      try {
-        await deferredPrompt.prompt();
-        const { outcome } = await deferredPrompt.userChoice;
-        if (outcome === 'accepted') {
-          setIsInstalling(true);
-          let progress = 0;
-          const interval = setInterval(() => {
-            progress += Math.random() * 40;
-            if (progress >= 100) {
-              setInstallProgress(100);
-              clearInterval(interval);
-              setTimeout(() => {
-                setIsInstalling(false);
-                setShowInstallButton(false);
-                setIsStandalone(true);
-              }, 1000);
-            } else {
-              setInstallProgress(progress);
-            }
-          }, 200);
-        }
-        setDeferredPrompt(null);
-      } catch (err) {
-        console.error('Install prompt failed:', err);
-      }
-    } else if (isIOS) {
-      setAlertModal('To install on iPhone: Tap the "Share" icon (square with arrow) at the bottom and select "Add to Home Screen".');
-    } else {
-      setAlertModal('To install: Open your browser menu (three dots or lines) and select "Install App" or "Add to Home Screen".');
+    try {
+      await deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      console.log(`User response to install prompt: ${outcome}`);
+      
+      setDeferredPrompt(null);
+      setShowInstallButton(false);
+    } catch (err) {
+      console.error('Install prompt failed:', err);
     }
   };
 
@@ -1277,7 +1242,7 @@ function BarberShop() {
       {isInAppBrowser && <InAppBrowserBanner />}
 
       <AnimatePresence>
-        {showInstallButton && userRole === 'client' && !isStandalone && (
+        {showInstallButton && deferredPrompt && !isStandalone && (
           <motion.div
             initial={{ y: 100, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
@@ -1285,14 +1250,6 @@ function BarberShop() {
             className="fixed bottom-24 left-4 right-4 z-[100]"
           >
             <div className="bg-gold-500 rounded-2xl p-5 shadow-2xl shadow-gold-500/40 border-2 border-white/30 relative overflow-hidden group">
-              {isInstalling && (
-                <motion.div 
-                  initial={{ width: 0 }}
-                  animate={{ width: `${installProgress}%` }}
-                  className="absolute bottom-0 left-0 h-1.5 bg-black/40 z-0"
-                />
-              )}
-              
               <div className="flex items-center justify-between relative z-10">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 bg-black rounded-2xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
@@ -1300,31 +1257,27 @@ function BarberShop() {
                   </div>
                   <div>
                     <p className="text-sm font-black text-black uppercase tracking-tighter leading-none mb-1">
-                      {isInstalling ? 'Installing MR YOU...' : (isIOS ? 'Install on iPhone' : 'Get App on Phone')}
+                      Install App
                     </p>
                     <p className="text-[10px] text-black/70 font-bold uppercase tracking-widest">
-                      {isInstalling ? `${Math.round(installProgress)}% completed` : (isIOS ? 'Tap Share > Add to Home Screen' : 'One-click install')}
+                      One-click install for better experience
                     </p>
                   </div>
                 </div>
-                {!isInstalling && (
-                  <button
-                    onClick={handleInstallClick}
-                    className="px-6 py-3 bg-black text-gold-500 rounded-xl text-xs font-black uppercase tracking-widest active:scale-95 transition-all shadow-xl hover:shadow-black/20"
-                  >
-                    {isIOS ? 'Guide' : 'Install Now'}
-                  </button>
-                )}
+                <button
+                  onClick={handleInstallClick}
+                  className="px-6 py-3 bg-black text-gold-500 rounded-xl text-xs font-black uppercase tracking-widest active:scale-95 transition-all shadow-xl hover:shadow-black/20"
+                >
+                  Install App
+                </button>
               </div>
               
-              {!isInstalling && (
-                <button 
-                  onClick={() => setShowInstallButton(false)}
-                  className="absolute top-2 right-2 w-6 h-6 bg-black/10 text-black/40 hover:text-black rounded-full flex items-center justify-center transition-colors"
-                >
-                  <X size={14} />
-                </button>
-              )}
+              <button 
+                onClick={() => setShowInstallButton(false)}
+                className="absolute top-2 right-2 w-6 h-6 bg-black/10 text-black/40 hover:text-black rounded-full flex items-center justify-center transition-colors"
+              >
+                <X size={14} />
+              </button>
             </div>
           </motion.div>
         )}
