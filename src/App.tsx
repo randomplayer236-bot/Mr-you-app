@@ -46,6 +46,7 @@ import {
   limit,
   addDoc, 
   getDocs,
+  where,
   serverTimestamp,
   writeBatch
 } from 'firebase/firestore';
@@ -137,6 +138,9 @@ interface Booking {
   notified?: boolean;
   isVip?: boolean;
   serviceType?: 'haircut' | 'hammam';
+  bookedAt?: string;
+  clientId?: string;
+  isManagerBooking?: boolean;
 }
 
 interface Notification {
@@ -166,12 +170,15 @@ const TRANSLATIONS = {
     vipBooking: 'VIP Booking',
     vipDetails: 'Proteins, Hair Dying, and more',
     hammam: 'Hammam',
-    hammamDetails: 'Soaps, professional cleaning, towels, and all you need.',
+    hammamDetails: 'Soaps, professional cleaning, towels',
     kick: 'Kick',
     unban: 'Unban',
     unbannedSection: 'Unbanned Section',
     kickedMessage: 'You have been kicked from the shop. Access denied.',
-    barbers: 'Barbers'
+    barbers: 'Barbers',
+    confirmCancel: 'Are you sure you want to cancel your booking?',
+    cancelSuccess: 'Booking cancelled successfully.',
+    cancelTimeLimit: 'You can only cancel at least 2 hours before the appointment.'
   },
   fr: {
     title: 'MR YOU', 
@@ -196,7 +203,10 @@ const TRANSLATIONS = {
     unban: 'Réintégrer',
     unbannedSection: 'Section des bannis',
     kickedMessage: 'Vous avez été renvoyé du salon. Accès refusé.',
-    barbers: 'Barbiers'
+    barbers: 'Barbiers',
+    confirmCancel: 'Êtes-vous sûr de vouloir annuler votre réservation ?',
+    cancelSuccess: 'Réservation annulée avec succès.',
+    cancelTimeLimit: 'Vous ne pouvez annuler qu\'au moins 2 heures avant le rendez-vous.'
   },
   ar: {
     title: 'MR YOU', 
@@ -221,7 +231,10 @@ const TRANSLATIONS = {
     unban: 'إلغاء الحظر',
     unbannedSection: 'قسم المحظورين',
     kickedMessage: 'لقد تم طردك من المحل. تم رفض الوصول.',
-    barbers: 'الحلاقين'
+    barbers: 'الحلاقين',
+    confirmCancel: 'هل أنت متأكد أنك تريد إلغاء حجزك؟',
+    cancelSuccess: 'تم إلغاء الحجز بنجاح.',
+    cancelTimeLimit: 'يمكنك الإلغاء قبل ساعتين على الأقل من الموعد.'
   }
 };
 
@@ -248,17 +261,57 @@ const InAppBrowserBanner = () => (
   </motion.div>
 );
 
+const DigitalClock = ({ offset = 0 }: { offset?: number }) => {
+  const [time, setTime] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTime(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const adjustedTime = new Date(time.getTime() + offset * 60000);
+
+  const formattedTime = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Africa/Casablanca',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(adjustedTime);
+
+  return (
+    <div className="flex flex-col items-center justify-center bg-black/40 backdrop-blur-md border border-gold-500/20 rounded-2xl p-4 shadow-xl">
+      <p className="text-[10px] font-black uppercase tracking-[0.3em] text-gold-500/60 mb-1">Salé El Jadida Time</p>
+      <p className="text-3xl font-mono font-black text-gold-500 tracking-wider drop-shadow-[0_0_100px_rgba(212,175,55,0.3)]">
+        {formattedTime}
+      </p>
+    </div>
+  );
+};
+
 function BarberShop() {
   const [lang, setLang] = useState<'en' | 'fr' | 'ar'>('fr');
   const [userRole, setUserRole] = useState<Role>('client');
   const [workerId, setWorkerId] = useState<string | null>(null);
+  const [clientId] = useState(() => {
+    let id = localStorage.getItem('barber_client_id');
+    if (!id) {
+      id = 'c_' + Math.random().toString(36).substr(2, 9);
+      localStorage.setItem('barber_client_id', id);
+    }
+    return id;
+  });
   const [barbers, setBarbers] = useState<Barber[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [viewDay, setViewDay] = useState<string>('Tuesday');
   const [settings, setSettings] = useState({ 
-    currentDay: 'Thursday', 
+    currentDay: 'Tuesday', 
     logoUrl: '', 
     vipPhotoUrl: '',
-    lastCleanupDate: ''
+    lastCleanupDate: '',
+    timeOffset: 0
   });
   const [stagedImages, setStagedImages] = useState<{ id: string, data: string, storagePath?: string, type: 'file' | 'url', folder: string, name: string }[]>([]);
 
@@ -347,6 +400,14 @@ function BarberShop() {
   const [showLogin, setShowLogin] = useState(false);
   const [loginForm, setLoginForm] = useState({ name: '', password: '' });
   const [bookingModal, setBookingModal] = useState<{ barberId: string; serviceType?: 'haircut' | 'hammam' } | null>(null);
+
+  useEffect(() => {
+    if (!bookingModal) {
+      setIsVipBooking(false);
+      setClientName('');
+      setBookingTime('');
+    }
+  }, [bookingModal]);
   const [confirmModal, setConfirmModal] = useState<{ message: string; onConfirm: () => void } | null>(null);
   const [alertModal, setAlertModal] = useState<string | null>(null);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
@@ -440,7 +501,7 @@ function BarberShop() {
       setBarbers(data);
     }, (e) => handleFirestoreError(e, OperationType.GET, 'barbers'));
 
-    const qBk = query(collection(db, 'bookings'), orderBy('createdAt', 'desc'), limit(100));
+    const qBk = query(collection(db, 'bookings'), orderBy('createdAt', 'desc'), limit(1000));
     const unsubBk = onSnapshot(qBk, (snap) => {
       setBookings(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Booking)).reverse());
     }, (e) => handleFirestoreError(e, OperationType.GET, 'bookings'));
@@ -455,12 +516,15 @@ function BarberShop() {
 
       if (snap.exists()) {
         const data = snap.data();
+        const currentDay = data.currentDay || 'Tuesday';
         setSettings({
-          currentDay: data.currentDay || 'Thursday',
+          currentDay: currentDay,
           logoUrl: data.logoUrl || defaultLogo,
           vipPhotoUrl: data.vipPhotoUrl || 'https://images.unsplash.com/photo-1512690196252-741d2fd36ad0?w=800&q=80',
-          lastCleanupDate: data.lastCleanupDate || ''
+          lastCleanupDate: data.lastCleanupDate || '',
+          timeOffset: data.timeOffset || 0
         });
+        setViewDay(currentDay);
         
         const currentLogo = data.logoUrl || defaultLogo;
         
@@ -473,9 +537,10 @@ function BarberShop() {
         if (appleIcon) appleIcon.setAttribute('href', currentLogo);
       } else {
         setDoc(doc(db, 'settings', 'global'), { 
-          currentDay: 'Thursday', 
+          currentDay: 'Tuesday', 
           logoUrl: '', 
-          lastCleanupDate: ''
+          lastCleanupDate: '',
+          timeOffset: 0
         })
           .catch(e => handleFirestoreError(e, OperationType.WRITE, 'settings/global'));
       }
@@ -486,7 +551,7 @@ function BarberShop() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      const now = new Date();
+      const now = new Date(new Date().getTime() + (settings.timeOffset || 0) * 60000);
       bookings.forEach(async (b) => {
         if (b.status === 'pending') {
           try {
@@ -631,6 +696,14 @@ function BarberShop() {
       const barber = barbers.find(b => b.id === bookingModal.barberId);
       const dayName = format(parseISO(bookingDate), 'EEEE');
       
+      const nowWithOffset = new Date(new Date().getTime() + (settings.timeOffset || 0) * 60000);
+      const bookedAtTime = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Africa/Casablanca',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).format(nowWithOffset);
+
       const bookingRef = await addDoc(collection(db, 'bookings'), {
         barberId: bookingModal.barberId, 
         clientName, 
@@ -639,8 +712,11 @@ function BarberShop() {
         dayName,
         status: 'pending', 
         createdAt: serverTimestamp(),
+        bookedAt: bookedAtTime,
         isVip: isVipBooking,
-        serviceType: bookingModal.serviceType || 'haircut'
+        serviceType: bookingModal.serviceType || 'haircut',
+        clientId: clientId,
+        isManagerBooking: userRole === 'manager' || userRole === 'admin'
       });
       
       // Create notification
@@ -652,6 +728,7 @@ function BarberShop() {
       });
 
       setBookingModal(null); setClientName(''); setBookingTime(''); setIsVipBooking(false);
+      setViewDay(dayName);
     } catch (e) { handleFirestoreError(e, OperationType.CREATE, 'bookings'); }
   };
 
@@ -660,33 +737,76 @@ function BarberShop() {
     catch (e) { handleFirestoreError(e, OperationType.UPDATE, `notifications/${id}`); }
   };
 
-  const clearDay = async () => {
+  const clearAllBookings = async () => {
     setConfirmModal({
-      message: `Are you sure you want to clear all bookings for ${settings.currentDay}?`,
+      message: `Are you sure you want to delete ALL bookings from the database? This cannot be undone.`,
       onConfirm: async () => {
         try {
-          const snap = await getDocs(collection(db, 'bookings'));
+          if (bookings.length === 0) {
+            setAlertModal(`No bookings found to clear.`);
+            return;
+          }
+
           let batch = writeBatch(db);
           let count = 0;
-          for (const d of snap.docs) {
-            const b = d.data() as Booking;
-            // Only delete if dayName matches currentDay or date corresponds to currentDay
-            const matchesDay = b.dayName === settings.currentDay || 
-                             (!b.dayName && b.date && format(parseISO(b.date), 'EEEE') === settings.currentDay);
-            
-            if (matchesDay) {
-              batch.delete(d.ref);
-              count++;
-              if (count === 500) {
-                await batch.commit();
-                batch = writeBatch(db);
-                count = 0;
-              }
+          
+          for (const b of bookings) {
+            batch.delete(doc(db, 'bookings', b.id));
+            count++;
+            if (count === 500) {
+              await batch.commit();
+              batch = writeBatch(db);
+              count = 0;
             }
           }
+          
           if (count > 0) await batch.commit();
-          setAlertModal(`All bookings for ${settings.currentDay} cleared successfully.`);
-        } catch (e) { handleFirestoreError(e, OperationType.DELETE, 'bookings'); }
+
+          setAlertModal(`All ${bookings.length} bookings have been wiped out.`);
+        } catch (e) { 
+          console.error("Error clearing all bookings:", e);
+          handleFirestoreError(e, OperationType.DELETE, 'bookings'); 
+        }
+      }
+    });
+  };
+
+  const clearDay = async () => {
+    setConfirmModal({
+      message: `Are you sure you want to clear all bookings for ${viewDay}?`,
+      onConfirm: async () => {
+        try {
+          // Filter the local bookings array to find exactly what's on the screen
+          const bookingsToDelete = bookings.filter(b => 
+            b.dayName === viewDay || 
+            (!b.dayName && b.date && format(parseISO(b.date), 'EEEE') === viewDay)
+          );
+
+          if (bookingsToDelete.length === 0) {
+            setAlertModal(`No bookings found for ${viewDay}.`);
+            return;
+          }
+
+          let batch = writeBatch(db);
+          let count = 0;
+          
+          for (const b of bookingsToDelete) {
+            batch.delete(doc(db, 'bookings', b.id));
+            count++;
+            if (count === 500) {
+              await batch.commit();
+              batch = writeBatch(db);
+              count = 0;
+            }
+          }
+          
+          if (count > 0) await batch.commit();
+
+          setAlertModal(`All ${bookingsToDelete.length} bookings for ${viewDay} cleared successfully.`);
+        } catch (e) { 
+          console.error("Error clearing day:", e);
+          handleFirestoreError(e, OperationType.DELETE, 'bookings'); 
+        }
       }
     });
   };
@@ -795,7 +915,7 @@ function BarberShop() {
     }
 
     setConfirmModal({
-      message: t.cancelBooking + '?',
+      message: t.confirmCancel,
       onConfirm: async () => {
         try {
           await deleteDoc(doc(db, 'bookings', bookingId));
@@ -811,43 +931,61 @@ function BarberShop() {
     const DAYS_ORDER = ['Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
     
     const cleanupInterval = setInterval(async () => {
-      const now = new Date();
+      const now = new Date(new Date().getTime() + (settings.timeOffset || 0) * 60000);
       const currentHour = now.getHours();
-      const currentMinute = now.getMinutes();
       const todayStr = format(now, 'yyyy-MM-dd');
 
-      // Check if it's 22:00 or later and we haven't cleaned up today
-      if (currentHour >= 22 && settings.lastCleanupDate !== todayStr) {
-        console.log('Starting daily cleanup at 22:00...');
+      // 1. If it's after 22:00 and we haven't cleaned up today's bookings yet
+      const shouldCleanupClosing = currentHour >= 22 && settings.lastCleanupDate !== todayStr;
+      
+      // 2. If the app is opened on a new day and the last cleanup was from a previous day
+      const isNewDay = settings.lastCleanupDate && settings.lastCleanupDate < todayStr;
+
+      if (shouldCleanupClosing || isNewDay) {
+        console.log('Starting cleanup process...');
         
         try {
-          // 1. Delete bookings for the current day
-          const bookingsToDelete = bookings.filter(b => b.dayName === settings.currentDay || b.date === todayStr);
-          const batch = writeBatch(db);
-          bookingsToDelete.forEach(b => {
-            batch.delete(doc(db, 'bookings', b.id));
-          });
+          // If we are cleaning up at closing, delete everything up to today
+          // If we are cleaning up because it's a new day, delete everything before today
+          const cleanupDateLimit = shouldCleanupClosing ? todayStr : format(new Date(now.getTime() - 86400000), 'yyyy-MM-dd');
           
-          // 2. Determine next day
-          const currentIndex = DAYS_ORDER.indexOf(settings.currentDay);
-          const nextIndex = (currentIndex + 1) % DAYS_ORDER.length;
-          const nextDay = DAYS_ORDER[nextIndex];
+          const q = query(collection(db, 'bookings'), where('date', '<=', cleanupDateLimit));
+          const snap = await getDocs(q);
+          
+          if (snap.docs.length > 0) {
+            let batch = writeBatch(db);
+            let count = 0;
+            for (const docSnap of snap.docs) {
+              batch.delete(docSnap.ref);
+              count++;
+              if (count === 500) {
+                await batch.commit();
+                batch = writeBatch(db);
+                count = 0;
+              }
+            }
+            if (count > 0) await batch.commit();
+          }
+          
+          // Determine the correct current day based on the clock
+          const dayName = format(now, 'EEEE');
+          const nextDay = shouldCleanupClosing ? DAYS_ORDER[(DAYS_ORDER.indexOf(dayName) + 1) % DAYS_ORDER.length] : dayName;
 
-          // 3. Update settings
           await updateDoc(doc(db, 'settings', 'global'), {
             currentDay: nextDay,
             lastCleanupDate: todayStr
           });
           
-          console.log(`Cleanup complete. Switched to ${nextDay}.`);
+          console.log(`Cleanup complete. Current day set to ${nextDay}.`);
         } catch (e) {
           console.error('Cleanup failed:', e);
+          handleFirestoreError(e, OperationType.DELETE, 'bookings');
         }
       }
     }, 30000); // Check every 30 seconds
 
     return () => clearInterval(cleanupInterval);
-  }, [settings.currentDay, settings.lastCleanupDate, bookings]);
+  }, [settings.currentDay, settings.lastCleanupDate, settings.timeOffset, bookings]);
 
   const deleteBooking = async (id: string) => {
     setConfirmModal({
@@ -885,6 +1023,13 @@ function BarberShop() {
         } catch (e) { handleFirestoreError(e, OperationType.DELETE, 'notifications'); }
       }
     });
+  };
+
+  const updateTimeOffset = async (offset: number) => {
+    if (userRole !== 'admin' && userRole !== 'manager') return;
+    try {
+      await updateDoc(doc(db, 'settings', 'global'), { timeOffset: offset });
+    } catch (e) { handleFirestoreError(e, OperationType.UPDATE, 'settings/global'); }
   };
 
   const filteredBarbers = useMemo(() => {
@@ -928,21 +1073,32 @@ function BarberShop() {
       <header className="border-b border-gold-500/10 bg-black/80 backdrop-blur-xl sticky top-0 z-50">
         <div className="bg-gradient-to-r from-gold-950/40 via-black to-gold-950/40 border-b border-gold-500/10 py-3 overflow-x-auto custom-scrollbar">
           <div className="max-w-7xl mx-auto px-4 flex items-center justify-center gap-3 min-w-max">
-            {['Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(day => (
-              <motion.button
-                key={day}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => updateCurrentDay(day)}
-                className={cn(
-                  "px-5 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all",
-                  settings.currentDay === day 
-                    ? "bg-gold-500 text-black shadow-lg shadow-gold-500/40" 
-                    : "text-white/40 hover:text-white/60 bg-white/5"
-                )}
-              >
-                {(t as any).days[day]}
-              </motion.button>
-            ))}
+            {['Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(day => {
+              const isToday = format(new Date(), 'EEEE') === day;
+              return (
+                <motion.button
+                  key={day}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => {
+                    setViewDay(day);
+                    if (userRole === 'admin' || userRole === 'manager') {
+                      updateCurrentDay(day);
+                    }
+                  }}
+                  className={cn(
+                    "px-5 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all relative",
+                    viewDay === day 
+                      ? "bg-gold-500 text-black shadow-lg shadow-gold-500/40" 
+                      : "text-white/40 hover:text-white/60 bg-white/5"
+                  )}
+                >
+                  {(t as any).days[day]}
+                  {isToday && (
+                    <div className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-500 rounded-full border border-black shadow-sm" />
+                  )}
+                </motion.button>
+              );
+            })}
           </div>
         </div>
         <div className="max-w-7xl mx-auto px-4 h-24 flex items-center justify-between">
@@ -1229,6 +1385,57 @@ function BarberShop() {
                   
                   {/* Shop Photos */}
                   <div className="mb-12">
+                    <div className="flex flex-col items-center gap-8 mb-12">
+                      <div className="relative group/clock">
+                        <DigitalClock offset={settings.timeOffset} />
+                        {(userRole === 'admin' || userRole === 'manager') && (
+                          <div className="absolute -bottom-12 left-1/2 -translate-x-1/2 flex items-center gap-2 opacity-0 group-hover/clock:opacity-100 transition-opacity bg-black/60 backdrop-blur-md p-2 rounded-xl border border-gold-500/20">
+                            <button 
+                              onClick={() => updateTimeOffset((settings.timeOffset || 0) - 60)}
+                              className="w-8 h-8 flex items-center justify-center bg-white/5 rounded-lg hover:bg-white/10 text-gold-500"
+                            >
+                              -1h
+                            </button>
+                            <button 
+                              onClick={() => updateTimeOffset((settings.timeOffset || 0) - 10)}
+                              className="w-8 h-8 flex items-center justify-center bg-white/5 rounded-lg hover:bg-white/10 text-gold-500"
+                            >
+                              -10m
+                            </button>
+                            <button 
+                              onClick={() => updateTimeOffset(0)}
+                              className="px-2 h-8 flex items-center justify-center bg-white/5 rounded-lg hover:bg-white/10 text-[8px] font-black uppercase text-gold-500"
+                            >
+                              Reset
+                            </button>
+                            <button 
+                              onClick={() => updateTimeOffset((settings.timeOffset || 0) + 10)}
+                              className="w-8 h-8 flex items-center justify-center bg-white/5 rounded-lg hover:bg-white/10 text-gold-500"
+                            >
+                              +10m
+                            </button>
+                            <button 
+                              onClick={() => updateTimeOffset((settings.timeOffset || 0) + 60)}
+                              className="w-8 h-8 flex items-center justify-center bg-white/5 rounded-lg hover:bg-white/10 text-gold-500"
+                            >
+                              +1h
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {(userRole === 'client' || userRole === 'manager' || userRole === 'admin') && (
+                        <motion.button 
+                          whileHover={{ scale: 1.05, y: -5 }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={() => shopMain && setBookingModal({ barberId: shopMain.id })} 
+                          className="w-full max-w-md py-6 bg-gradient-to-r from-gold-600 via-gold-500 to-gold-600 text-black rounded-[2rem] font-black text-xl uppercase tracking-[0.2em] shadow-[0_20px_50px_rgba(212,175,55,0.3)] hover:shadow-[0_25px_60px_rgba(212,175,55,0.4)] transition-all"
+                        >
+                          {t.bookNow}
+                        </motion.button>
+                      )}
+                    </div>
+
                     <div className="flex flex-col xl:flex-row items-center justify-between gap-4 sm:gap-6 mb-6">
                       <h3 className="text-[11px] uppercase tracking-[0.3em] text-gold-500/60 font-black flex items-center gap-3">
                         <div className="w-8 h-[1px] bg-gold-500/30" />
@@ -1284,183 +1491,155 @@ function BarberShop() {
                         </div>
                       </div>
                     </div>
-                    
-                    {/* Planning en direct (Live Schedule) */}
-                    <div className="mt-16">
-                      <div className="flex items-center justify-between mb-8">
-                        <div>
-                          <h3 className="text-3xl font-serif italic text-gold-200">{t.liveSchedule}</h3>
-                          <p className="text-[10px] uppercase tracking-widest text-gold-500/40 mt-1">{t.allBookingsVisible}</p>
-                        </div>
-                        <div className="flex items-center gap-2 px-4 py-2 bg-gold-500/5 border border-gold-500/20 rounded-xl">
-                          <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-                          <span className="text-[10px] font-black uppercase tracking-widest text-emerald-500">Live</span>
-                        </div>
-                      </div>
-
-                      <div className="space-y-4 max-h-[500px] overflow-y-auto pr-4 custom-scrollbar">
-                        {bookings
-                          .filter(b => {
-                            const isToday = b.date === format(new Date(), 'yyyy-MM-dd');
-                            const isCurrentDay = b.dayName === settings.currentDay || (!b.dayName && format(parseISO(b.date), 'EEEE') === settings.currentDay);
-                            return isToday || isCurrentDay;
-                          })
-                          .sort((a, b) => a.time.localeCompare(b.time))
-                          .map((b, i) => {
-                            const barber = barbers.find(bar => bar.id === b.barberId);
-                            return (
-                              <motion.div
-                                key={b.id}
-                                initial={{ opacity: 0, x: -20 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                transition={{ delay: i * 0.05 }}
-                                className="bg-white/5 border border-white/10 rounded-2xl p-5 flex items-center justify-between group hover:border-gold-500/30 transition-all"
-                              >
-                                <div className="flex items-center gap-5">
-                                  <span className="text-xs font-black text-gold-500/30 w-6">{String(i + 1).padStart(2, '0')}</span>
-                                  <div className="w-12 h-12 bg-gold-500/10 rounded-2xl flex items-center justify-center border border-gold-500/20 group-hover:bg-gold-500/20 transition-all">
-                                    <Clock size={20} className="text-gold-500" />
-                                  </div>
-                                  <div>
-                                    <div className="flex items-center gap-2">
-                                      <p className="text-base font-black text-white/90">{b.clientName}</p>
-                                      {b.isVip && (
-                                        <span className="px-2 py-0.5 bg-gold-500 text-black text-[8px] font-black uppercase rounded-md shadow-lg shadow-gold-500/20">VIP</span>
-                                      )}
-                                      {b.serviceType === 'hammam' && (
-                                        <span className="px-2 py-0.5 bg-blue-500 text-white text-[8px] font-black uppercase rounded-md shadow-lg shadow-blue-500/20">HAMMAM</span>
-                                      )}
-                                    </div>
-                                    <p className="text-[11px] text-gold-500/60 font-bold uppercase tracking-widest">{b.time} • {b.date}</p>
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-4">
-                                  <div className="text-right">
-                                    <p className="text-[9px] text-white/20 uppercase font-black tracking-tighter mb-1">Barber</p>
-                                    <p className="text-xs text-gold-200 font-bold italic">{barber?.name || 'MR YOU'}</p>
-                                  </div>
-                                  <div className="flex items-center gap-2 border-l border-white/10 pl-4 ml-2">
-                                    {b.status === 'completed' ? (
-                                      <CheckCircle2 size={22} className="text-emerald-400" />
-                                    ) : b.status === 'missed' ? (
-                                      <XCircle size={22} className="text-red-400" />
-                                    ) : (
-                                      <div className="flex items-center gap-2">
-                                        {userRole !== 'client' ? (
-                                          <>
-                                            <motion.button 
-                                              whileTap={{ scale: 0.9 }} 
-                                              onClick={() => completeBooking(b.id)} 
-                                              className="p-2 bg-emerald-500/10 text-emerald-400 rounded-xl hover:bg-emerald-500/20 transition-colors border border-emerald-500/20" 
-                                              title="Complete"
-                                            >
-                                              <CheckCircle2 size={18} />
-                                            </motion.button>
-                                            <motion.button 
-                                              whileTap={{ scale: 0.9 }} 
-                                              onClick={() => markAsMissed(b.id)} 
-                                              className="p-2 bg-red-500/10 text-red-400 rounded-xl hover:bg-red-500/20 transition-colors border border-red-500/20" 
-                                              title="Mark as Missed/Late"
-                                            >
-                                              <X size={18} />
-                                            </motion.button>
-                                          </>
-                                        ) : (
-                                          <motion.button 
-                                            whileTap={{ scale: 0.9 }} 
-                                            onClick={() => cancelBooking(b.id)} 
-                                            className="p-2 bg-red-500/10 text-red-400 rounded-xl hover:bg-red-500/20 transition-colors border border-red-500/20" 
-                                            title={t.cancelBooking}
-                                          >
-                                            <X size={18} />
-                                          </motion.button>
-                                        )}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              </motion.div>
-                            );
-                          })}
-                        {bookings.filter(b => {
-                            const isToday = b.date === format(new Date(), 'yyyy-MM-dd');
-                            const isCurrentDay = b.dayName === settings.currentDay || (!b.dayName && format(parseISO(b.date), 'EEEE') === settings.currentDay);
-                            return isToday || isCurrentDay;
-                          }).length === 0 && (
-                          <div className="py-16 bg-white/5 border border-dashed border-white/10 rounded-3xl text-center">
-                            <p className="text-xs text-white/20 uppercase font-black tracking-widest">No active bookings for today</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
                   </div>
-
-                  <div className="space-y-4 mb-12 max-h-80 overflow-y-auto pr-4 custom-scrollbar hidden">
-                    {bookings
-                      .filter(b => shopMain && b.barberId === shopMain.id && (b.dayName === settings.currentDay || (!b.dayName && format(parseISO(b.date), 'EEEE') === settings.currentDay)))
-                      .map((b, i) => {
-                        const isToday = b.date === format(new Date(), 'yyyy-MM-dd');
-                        return (
-                          <motion.div 
-                            key={b.id} 
-                            initial={{ opacity: 0, x: -20 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            transition={{ delay: i * 0.05 }}
-                            className={cn("flex items-center justify-between p-5 rounded-3xl border transition-all", isToday ? "bg-gold-500/10 border-gold-500/30 shadow-lg shadow-gold-500/5" : "bg-white/5 border-white/5 hover:border-white/10")}
-                          >
-                            <div className="flex items-center gap-5">
-                              <span className="text-xs font-black text-gold-500/30 w-6">{String(i + 1).padStart(2, '0')}</span>
-                              <div>
-                                <p className="text-sm font-black tracking-wide">{b.clientName}</p>
-                                <div className="flex items-center gap-2 mt-1">
-                                  <Clock size={10} className="text-gold-500/40" />
-                                  <p className="text-[10px] text-white/40 font-bold uppercase tracking-widest">{b.time} <span className="ml-2 opacity-30">| {b.date}</span></p>
-                                </div>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              {b.status === 'completed' ? <CheckCircle2 size={20} className="text-emerald-400" /> : b.status === 'missed' ? <XCircle size={20} className="text-red-400" /> : (
-                                <div className="flex items-center gap-2">
-                                  {userRole !== 'client' ? (
-                                    <>
-                                      <motion.button whileTap={{ scale: 0.9 }} onClick={() => completeBooking(b.id)} className="p-2.5 bg-emerald-500/10 text-emerald-400 rounded-2xl hover:bg-emerald-500/20 transition-colors" title="Complete"><CheckCircle2 size={20} /></motion.button>
-                                      <motion.button whileTap={{ scale: 0.9 }} onClick={() => markAsMissed(b.id)} className="p-2.5 bg-red-500/10 text-red-400 rounded-2xl hover:bg-red-500/20 transition-colors" title="Mark as Missed/Late"><X size={20} /></motion.button>
-                                    </>
-                                  ) : (
-                                    <motion.button whileTap={{ scale: 0.9 }} onClick={() => cancelBooking(b.id)} className="p-2.5 bg-red-500/10 text-red-400 rounded-2xl hover:bg-red-500/20 transition-colors" title={t.cancelBooking}><X size={20} /></motion.button>
-                                  )}
-                                </div>
-                              )}
-                              {userRole === 'admin' && (
-                                <motion.button whileTap={{ scale: 0.9 }} onClick={() => deleteBooking(b.id)} className="p-2.5 bg-red-500/10 text-red-400 rounded-2xl hover:bg-red-500/20 transition-colors"><Trash2 size={20} /></motion.button>
-                              )}
-                            </div>
-                          </motion.div>
-                        );
-                      })}
-                    {shopMain && bookings.filter(b => b.barberId === shopMain.id && (b.dayName === settings.currentDay || (!b.dayName && format(parseISO(b.date), 'EEEE') === settings.currentDay))).length === 0 && (
-                      <div className="text-center py-16 border-2 border-dashed border-white/5 rounded-[2.5rem]">
-                        <Scissors className="mx-auto text-white/5 mb-4" size={32} />
-                        <p className="text-[11px] text-white/20 uppercase tracking-[0.3em] font-black">{t.noBookings}</p>
-                      </div>
-                    )}
-                  </div>
-
-                  {userRole === 'client' && (
-                    <motion.button 
-                      whileHover={{ scale: 1.02, y: -2 }}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={() => shopMain && setBookingModal({ barberId: shopMain.id })} 
-                      className="w-full py-6 bg-gradient-to-r from-gold-600 via-gold-500 to-gold-600 text-black rounded-[2rem] font-black text-xl uppercase tracking-[0.2em] shadow-[0_20px_50px_rgba(212,175,55,0.2)] hover:shadow-[0_25px_60px_rgba(212,175,55,0.3)] transition-all"
-                    >
-                      {t.bookNow}
-                    </motion.button>
-                  )}
                 </div>
               </div>
             </div>
           </motion.div>
         )}
+
+        {/* Planning en direct (Live Schedule) - Moved outside shopMain to be always visible */}
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5 }}
+          className="mb-24 max-w-5xl mx-auto px-4 sm:px-0"
+        >
+          <div className="bg-black border border-gold-500/20 rounded-[2rem] sm:rounded-[4rem] p-6 sm:p-16 relative transition-all hover:border-gold-500/40 shadow-[0_0_100px_rgba(212,175,55,0.05)]">
+            <div className="flex items-center justify-between mb-8">
+              <div>
+                <h3 className="text-3xl font-serif italic text-gold-200">{t.liveSchedule}</h3>
+                <p className="text-[10px] uppercase tracking-widest text-gold-500/40 mt-1">{t.allBookingsVisible}</p>
+              </div>
+              <div className="flex items-center gap-2 px-4 py-2 bg-gold-500/5 border border-gold-500/20 rounded-xl">
+                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                <span className="text-[10px] font-black uppercase tracking-widest text-emerald-500">Live</span>
+              </div>
+            </div>
+
+            <div className="space-y-4 max-h-[500px] overflow-y-auto pr-4 custom-scrollbar">
+              {bookings
+                .filter(b => {
+                  const isSelectedDay = b.dayName === viewDay || (!b.dayName && b.date && format(parseISO(b.date), 'EEEE') === viewDay);
+                  return isSelectedDay;
+                })
+                .sort((a, b) => a.time.localeCompare(b.time))
+                .map((b, i) => {
+                  const barber = barbers.find(bar => bar.id === b.barberId);
+                  return (
+                    <motion.div
+                      key={b.id}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: i * 0.05 }}
+                      className="bg-white/5 border border-white/10 rounded-2xl p-5 flex items-center justify-between group hover:border-gold-500/30 transition-all"
+                    >
+                      <div className="flex items-center gap-5">
+                        <span className="text-xs font-black text-gold-500/30 w-6">{String(i + 1).padStart(2, '0')}</span>
+                        <div className="w-12 h-12 bg-gold-500/10 rounded-2xl flex items-center justify-center border border-gold-500/20 group-hover:bg-gold-500/20 transition-all">
+                          <Clock size={20} className="text-gold-500" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <p className="text-base font-black text-white/90">{b.clientName}</p>
+                            {b.clientId === clientId && (
+                              <motion.div
+                                initial={{ scale: 0 }}
+                                animate={{ scale: 1 }}
+                                className="w-5 h-5 bg-gold-500 rounded-full flex items-center justify-center shadow-lg shadow-gold-500/40"
+                                title="Your Booking"
+                              >
+                                <ShieldCheck size={12} className="text-black" />
+                              </motion.div>
+                            )}
+                            {b.isManagerBooking && (userRole === 'manager' || userRole === 'admin') && (
+                              <motion.div
+                                initial={{ scale: 0 }}
+                                animate={{ scale: 1 }}
+                                className="w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center shadow-lg shadow-blue-500/40"
+                                title="Manager Booking"
+                              >
+                                <ShieldCheck size={12} className="text-white" />
+                              </motion.div>
+                            )}
+                            {b.isVip && (
+                              <span className="px-2 py-0.5 bg-gold-500 text-black text-[8px] font-black uppercase rounded-md shadow-lg shadow-gold-500/20">VIP</span>
+                            )}
+                            {b.serviceType === 'hammam' && (
+                              <span className="px-2 py-0.5 bg-blue-500 text-white text-[8px] font-black uppercase rounded-md shadow-lg shadow-blue-500/20">HAMMAM</span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-gold-500/60 font-bold uppercase tracking-widest">
+                            {b.time} • {b.date}
+                            {b.bookedAt && (
+                              <span className="ml-2 text-[9px] text-white/20 normal-case font-normal italic">
+                                Booked at {b.bookedAt}
+                              </span>
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <div className="text-right">
+                          <p className="text-[9px] text-white/20 uppercase font-black tracking-tighter mb-1">Barber</p>
+                          <p className="text-xs text-gold-200 font-bold italic">{barber?.name || 'MR YOU'}</p>
+                        </div>
+                        <div className="flex items-center gap-2 border-l border-white/10 pl-4 ml-2">
+                          {b.status === 'completed' ? (
+                            <CheckCircle2 size={22} className="text-emerald-400" />
+                          ) : b.status === 'missed' ? (
+                            <XCircle size={22} className="text-red-400" />
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              {userRole !== 'client' ? (
+                                <>
+                                  <motion.button 
+                                    whileTap={{ scale: 0.9 }} 
+                                    onClick={() => completeBooking(b.id)} 
+                                    className="p-2 bg-emerald-500/10 text-emerald-400 rounded-xl hover:bg-emerald-500/20 transition-colors border border-emerald-500/20" 
+                                    title="Complete"
+                                  >
+                                    <CheckCircle2 size={18} />
+                                  </motion.button>
+                                  <motion.button 
+                                    whileTap={{ scale: 0.9 }} 
+                                    onClick={() => markAsMissed(b.id)} 
+                                    className="p-2 bg-red-500/10 text-red-400 rounded-xl hover:bg-red-500/20 transition-colors border border-red-500/20" 
+                                    title="Mark as Missed/Late"
+                                  >
+                                    <X size={18} />
+                                  </motion.button>
+                                </>
+                              ) : b.clientId === clientId ? (
+                                <motion.button 
+                                  whileTap={{ scale: 0.9 }} 
+                                  onClick={() => cancelBooking(b.id)} 
+                                  className="p-2 bg-red-500/10 text-red-400 rounded-xl hover:bg-red-500/20 transition-colors border border-red-500/20" 
+                                  title={t.cancelBooking}
+                                >
+                                  <X size={18} />
+                                </motion.button>
+                              ) : null}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              {bookings.filter(b => {
+                  const isSelectedDay = b.dayName === viewDay || (!b.dayName && b.date && format(parseISO(b.date), 'EEEE') === viewDay);
+                  return isSelectedDay;
+                }).length === 0 && (
+                <div className="py-16 bg-white/5 border border-dashed border-white/10 rounded-3xl text-center">
+                  <p className="text-xs text-white/20 uppercase font-black tracking-widest">No active bookings for this day</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </motion.div>
+
+
 
         {/* Barbers Section */}
         <div className="max-w-7xl mx-auto px-4 mb-32">
@@ -1536,7 +1715,7 @@ function BarberShop() {
 
                     <div className="space-y-3 mb-8 max-h-56 overflow-y-auto pr-2 custom-scrollbar">
                       {bookings
-                        .filter(b => b.barberId === barber.id && (b.dayName === settings.currentDay || (!b.dayName && format(parseISO(b.date), 'EEEE') === settings.currentDay)))
+                        .filter(b => b.barberId === barber.id && (b.dayName === viewDay || (!b.dayName && format(parseISO(b.date), 'EEEE') === viewDay)))
                         .map((b, i) => {
                           const isToday = b.date === format(new Date(), 'yyyy-MM-dd');
                         return (
@@ -1549,13 +1728,26 @@ function BarberShop() {
                             <div className="flex items-center gap-3">
                               <span className="text-[10px] font-black text-gold-500/30">{String(i + 1).padStart(2, '0')}</span>
                               <div>
-                                <p className="text-[11px] font-black tracking-wide">
+                                <p className="text-[11px] font-black tracking-wide flex items-center gap-2">
                                   {b.clientName}
+                                  {b.clientId === clientId && (
+                                    <ShieldCheck size={10} className="text-gold-500" />
+                                  )}
+                                  {b.isManagerBooking && (userRole === 'manager' || userRole === 'admin') && (
+                                    <ShieldCheck size={10} className="text-blue-400" />
+                                  )}
                                   {b.serviceType === 'hammam' && (
-                                    <span className="ml-2 px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded text-[7px] uppercase font-black">Hammam</span>
+                                    <span className="px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded text-[7px] uppercase font-black">Hammam</span>
                                   )}
                                 </p>
-                                <p className="text-[9px] text-white/40 font-bold uppercase tracking-widest mt-0.5">{b.time}</p>
+                                <p className="text-[9px] text-white/40 font-bold uppercase tracking-widest mt-0.5">
+                                  {b.time}
+                                  {b.bookedAt && (
+                                    <span className="ml-2 text-[8px] text-white/20 normal-case font-normal italic">
+                                      ({b.bookedAt})
+                                    </span>
+                                  )}
+                                </p>
                               </div>
                             </div>
                             <div className="flex items-center gap-2">
@@ -1566,9 +1758,9 @@ function BarberShop() {
                                       <motion.button whileTap={{ scale: 0.9 }} onClick={() => completeBooking(b.id)} className="p-1.5 bg-emerald-500/10 text-emerald-400 rounded-xl hover:bg-emerald-500/20 transition-colors" title="Complete"><CheckCircle2 size={16} /></motion.button>
                                       <motion.button whileTap={{ scale: 0.9 }} onClick={() => markAsMissed(b.id)} className="p-1.5 bg-red-500/10 text-red-400 rounded-xl hover:bg-red-500/20 transition-colors" title="Mark as Missed/Late"><X size={16} /></motion.button>
                                     </>
-                                  ) : userRole === 'client' && (
+                                  ) : b.clientId === clientId ? (
                                     <motion.button whileTap={{ scale: 0.9 }} onClick={() => cancelBooking(b.id)} className="p-1.5 bg-red-500/10 text-red-400 rounded-xl hover:bg-red-500/20 transition-colors" title={t.cancelBooking}><X size={16} /></motion.button>
-                                  )}
+                                  ) : null}
                                 </div>
                               )}
                               {userRole === 'admin' && (
@@ -1578,11 +1770,11 @@ function BarberShop() {
                           </motion.div>
                         );
                       })}
-                      {bookings.filter(b => b.barberId === barber.id && (b.dayName === settings.currentDay || (!b.dayName && format(parseISO(b.date), 'EEEE') === settings.currentDay))).length === 0 && (
+                      {bookings.filter(b => b.barberId === barber.id && (b.dayName === viewDay || (!b.dayName && format(parseISO(b.date), 'EEEE') === viewDay))).length === 0 && (
                         <p className="text-center py-8 text-[10px] text-white/10 uppercase tracking-[0.2em] font-black border border-dashed border-white/5 rounded-2xl">{t.noBookings}</p>
                       )}
                     </div>
-                    {userRole === 'client' && barber.status !== 'unavailable' && (
+                    {(userRole === 'client' || userRole === 'manager' || userRole === 'admin') && barber.status !== 'unavailable' && (
                       <motion.button 
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
@@ -1640,15 +1832,25 @@ function BarberShop() {
       </main>
 
       {(userRole === 'admin' || userRole === 'manager') && (
-        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-50">
+        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-50 flex items-center gap-4">
           <motion.button 
             whileHover={{ scale: 1.05, y: -5 }}
             whileTap={{ scale: 0.95 }}
             onClick={clearDay} 
-            className="px-10 py-5 bg-red-600 text-white rounded-full font-black uppercase tracking-widest text-xs shadow-[0_20px_40px_rgba(220,38,38,0.3)] flex items-center gap-4 border border-red-500/20"
+            className="px-8 py-5 bg-red-600/20 text-red-500 rounded-full font-black uppercase tracking-widest text-[10px] shadow-2xl flex items-center gap-3 border border-red-500/20 backdrop-blur-xl"
           >
-            <Trash2 size={20} />
+            <Trash2 size={16} />
             {t.clearDay}
+          </motion.button>
+
+          <motion.button 
+            whileHover={{ scale: 1.05, y: -5 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={clearAllBookings} 
+            className="px-8 py-5 bg-red-600 text-white rounded-full font-black uppercase tracking-widest text-[10px] shadow-[0_20px_40px_rgba(220,38,38,0.3)] flex items-center gap-3 border border-red-500/20"
+          >
+            <Trash2 size={16} />
+            Wipe All
           </motion.button>
         </div>
       )}
@@ -1700,7 +1902,14 @@ function BarberShop() {
                   {t.cancel}
                 </button>
                 <button 
-                  onClick={() => { confirmModal.onConfirm(); setConfirmModal(null); }}
+                  onClick={async () => { 
+                    try {
+                      await confirmModal.onConfirm(); 
+                    } catch (err) {
+                      console.error("Confirm error:", err);
+                    }
+                    setConfirmModal(null); 
+                  }}
                   className="flex-1 py-3 bg-red-600 rounded-xl font-bold shadow-lg shadow-red-600/20"
                 >
                   {t.confirm}
@@ -1778,7 +1987,7 @@ function BarberShop() {
                 </div>
 
                 {/* VIP Toggle */}
-                {shopMain && bookingModal.barberId === shopMain.id && (
+                {shopMain && bookingModal.barberId === shopMain.id && bookingModal.serviceType !== 'hammam' && (
                   <motion.div 
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
