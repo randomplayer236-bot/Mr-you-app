@@ -178,7 +178,14 @@ const TRANSLATIONS = {
     barbers: 'Barbers',
     confirmCancel: 'Are you sure you want to cancel your booking?',
     cancelSuccess: 'Booking cancelled successfully.',
-    cancelTimeLimit: 'You can only cancel at least 2 hours before the appointment.'
+    cancelTimeLimit: 'You can only cancel at least 2 hours before the appointment.',
+    installApp: 'Install App',
+    installInstructions: 'Installation Instructions',
+    iosInstall: 'On iPhone: Tap the Share button (square with arrow) and select "Add to Home Screen".',
+    androidInstall: 'On Android: Tap the menu button (three dots) and select "Install app" or "Add to Home screen".',
+    updateAvailable: 'Update Available',
+    updateNow: 'Update Now',
+    refreshing: 'Refreshing...'
   },
   fr: {
     title: 'MR YOU', 
@@ -206,7 +213,14 @@ const TRANSLATIONS = {
     barbers: 'Barbiers',
     confirmCancel: 'Êtes-vous sûr de vouloir annuler votre réservation ?',
     cancelSuccess: 'Réservation annulée avec succès.',
-    cancelTimeLimit: 'Vous ne pouvez annuler qu\'au moins 2 heures avant le rendez-vous.'
+    cancelTimeLimit: 'Vous ne pouvez annuler qu\'au moins 2 heures avant le rendez-vous.',
+    installApp: 'Installer l\'application',
+    installInstructions: 'Instructions d\'installation',
+    iosInstall: 'Sur iPhone : Appuyez sur le bouton Partager (carré avec flèche) et sélectionnez "Sur l\'écran d\'accueil".',
+    androidInstall: 'Sur Android : Appuyez sur le bouton menu (trois points) et sélectionnez "Installer l\'application" ou "Ajouter à l\'écran d\'accueil".',
+    updateAvailable: 'Mise à jour disponible',
+    updateNow: 'Mettre à jour maintenant',
+    refreshing: 'Actualisation...'
   },
   ar: {
     title: 'MR YOU', 
@@ -234,7 +248,14 @@ const TRANSLATIONS = {
     barbers: 'الحلاقين',
     confirmCancel: 'هل أنت متأكد أنك تريد إلغاء حجزك؟',
     cancelSuccess: 'تم إلغاء الحجز بنجاح.',
-    cancelTimeLimit: 'يمكنك الإلغاء قبل ساعتين على الأقل من الموعد.'
+    cancelTimeLimit: 'يمكنك الإلغاء قبل ساعتين على الأقل من الموعد.',
+    installApp: 'تثبيت التطبيق',
+    installInstructions: 'تعليمات التثبيت',
+    iosInstall: 'على iPhone: اضغط على زر المشاركة (مربع بسهم) واختر "إضافة إلى الشاشة الرئيسية".',
+    androidInstall: 'على Android: اضغط على زر القائمة (ثلاث نقاط) واختر "تثبيت التطبيق" أو "إضافة إلى الشاشة الرئيسية".',
+    updateAvailable: 'تحديث متاح',
+    updateNow: 'تحديث الآن',
+    refreshing: 'جاري التحديث...'
   }
 };
 
@@ -260,6 +281,98 @@ const InAppBrowserBanner = () => (
     </div>
   </motion.div>
 );
+
+const PWAInstallPrompt = ({ lang, t }: { lang: string, t: any }) => {
+  const [show, setShow] = useState(false);
+  const [isIOS, setIsIOS] = useState(false);
+
+  useEffect(() => {
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone;
+    const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+    setIsIOS(isIOSDevice);
+    
+    if (!isStandalone) {
+      setShow(true);
+    }
+  }, []);
+
+  if (!show) return null;
+
+  return (
+    <motion.div
+      initial={{ y: 100 }}
+      animate={{ y: 0 }}
+      className="fixed bottom-4 left-4 right-4 z-[100] bg-black/90 backdrop-blur-xl border border-gold-500/20 p-4 rounded-2xl shadow-2xl"
+    >
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-3">
+          <Download className="text-gold-500" size={20} />
+          <p className="text-xs font-black uppercase tracking-widest text-gold-500">{t.installApp}</p>
+        </div>
+        <button onClick={() => setShow(false)} className="text-white/40 hover:text-white">
+          <X size={16} />
+        </button>
+      </div>
+      <p className="text-[10px] text-white/70 leading-relaxed">
+        {isIOS ? t.iosInstall : t.androidInstall}
+      </p>
+    </motion.div>
+  );
+};
+
+const UpdatePrompt = ({ t }: { t: any }) => {
+  const [show, setShow] = useState(false);
+  const [waitingWorker, setWaitingWorker] = useState<ServiceWorker | null>(null);
+
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistration().then(reg => {
+        if (reg) {
+          reg.addEventListener('updatefound', () => {
+            const newWorker = reg.installing;
+            if (newWorker) {
+              newWorker.addEventListener('statechange', () => {
+                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                  setWaitingWorker(newWorker);
+                  setShow(true);
+                }
+              });
+            }
+          });
+        }
+      });
+    }
+  }, []);
+
+  const updateApp = () => {
+    if (waitingWorker) {
+      waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+      setShow(false);
+      window.location.reload();
+    }
+  };
+
+  if (!show) return null;
+
+  return (
+    <motion.div
+      initial={{ y: -100 }}
+      animate={{ y: 0 }}
+      className="fixed top-20 left-4 right-4 z-[100] bg-gold-500 text-black p-4 rounded-xl shadow-2xl flex items-center justify-between"
+    >
+      <div className="flex items-center gap-3">
+        <Bell size={20} className="animate-bounce" />
+        <p className="text-xs font-black uppercase tracking-widest">{t.updateAvailable}</p>
+      </div>
+      <button
+        onClick={updateApp}
+        className="px-4 py-2 bg-black text-gold-500 rounded-lg text-[10px] font-black uppercase tracking-widest"
+      >
+        {t.updateNow}
+      </button>
+    </motion.div>
+  );
+};
 
 const DigitalClock = ({ offset = 0 }: { offset?: number }) => {
   const [time, setTime] = useState(new Date());
@@ -1070,6 +1183,8 @@ function BarberShop() {
 
   return (
     <div className={`min-h-screen bg-black text-white selection:bg-gold-500/30 selection:text-gold-200 ${isRtl ? 'rtl' : 'ltr'}`}>
+      <PWAInstallPrompt lang={lang} t={t} />
+      <UpdatePrompt t={t} />
       <header className="border-b border-gold-500/10 bg-black/80 backdrop-blur-xl sticky top-0 z-50">
         <div className="bg-gradient-to-r from-gold-950/40 via-black to-gold-950/40 border-b border-gold-500/10 py-3 overflow-x-auto custom-scrollbar">
           <div className="max-w-7xl mx-auto px-4 flex items-center justify-center gap-3 min-w-max">
