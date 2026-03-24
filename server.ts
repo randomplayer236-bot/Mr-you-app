@@ -6,7 +6,8 @@ import multer from "multer";
 import { Storage } from "@google-cloud/storage";
 import fs from "fs";
 import webpush from "web-push";
-import admin from "firebase-admin";
+import { initializeApp, getApps } from "firebase-admin/app";
+import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { format, parseISO, addMinutes, isAfter, isBefore, subMinutes } from "date-fns";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -36,12 +37,12 @@ async function startServer() {
     const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     
     // Initialize Firebase Admin
-    if (admin.apps.length === 0) {
-      admin.initializeApp({
+    if (getApps().length === 0) {
+      initializeApp({
         projectId: firebaseConfig.projectId
       });
     }
-    const db = admin.firestore(firebaseConfig.firestoreDatabaseId || '(default)');
+    const db = getFirestore(firebaseConfig.firestoreDatabaseId || '(default)');
     
     let bucketName = process.env.STORAGE_BUCKET || firebaseConfig.storageBucket;
 
@@ -126,7 +127,7 @@ async function startServer() {
         await db.collection("push_subscriptions").doc(clientId).set({
           subscription,
           clientId,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          updatedAt: FieldValue.serverTimestamp()
         });
         res.status(201).json({ success: true });
       } catch (error: any) {

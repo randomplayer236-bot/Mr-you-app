@@ -158,7 +158,7 @@ const TRANSLATIONS = {
     available: 'Available', working: 'Working', unavailable: 'Unavailable',
     bookNow: 'Book Now', clientName: 'Your Name', pickTime: 'Pick Time', pickDate: 'Pick Date', confirm: 'Confirm Booking', cancel: 'Cancel',
     admin: 'Admin', manager: 'Manager', worker: 'Worker', login: 'Login', password: 'Password', clearDay: 'Clear Day',
-    workingDays: 'Tuesday - Sunday (10:00 - 22:00)', fifteenMinRule: 'Note: Max 15 mins late or booking missed.',
+    workingDays: 'Tuesday - Sunday (10:00 - 22:00)', tenMinRule: 'Note: Max 15 mins late or booking missed.',
     done: 'Done', delete: 'Delete', noBookings: 'No bookings', clientsBefore: 'Clients before you', logout: 'Logout',
     notifications: 'Notifications',
     liveSchedule: 'Live Schedule',
@@ -193,7 +193,7 @@ const TRANSLATIONS = {
     available: 'Disponible', working: 'En cours', unavailable: 'Indisponible',
     bookNow: 'Réserver', clientName: 'Votre Nom', pickTime: 'Choisir l\'heure', pickDate: 'Choisir la date', confirm: 'Confirmer', cancel: 'Annuler',
     admin: 'Admin', manager: 'Gérant', worker: 'Coiffeur', login: 'Connexion', password: 'Mot de passe', clearDay: 'Effacer',
-    workingDays: 'Mardi - Dimanche (10:00 - 22:00)', fifteenMinRule: 'Note: Max 15 min de retard ou annulé.',
+    workingDays: 'Mardi - Dimanche (10:00 - 22:00)', tenMinRule: 'Note: Max 15 min de retard ou annulé.',
     done: 'Terminé', delete: 'Supprimer', noBookings: 'Aucune réservation', clientsBefore: 'Clients avant vous', logout: 'Déconnexion',
     notifications: 'Notifications',
     liveSchedule: 'Planning en direct',
@@ -228,7 +228,7 @@ const TRANSLATIONS = {
     available: 'متاح', working: 'يعمل', unavailable: 'غير متاح',
     bookNow: 'احجز الآن', clientName: 'اسمك', pickTime: 'اختر الوقت', pickDate: 'اختر التاريخ', confirm: 'تأكيد الحجز', cancel: 'إلغاء',
     admin: 'مسؤول', manager: 'مدير', worker: 'حلاق', login: 'تسجيل الدخول', password: 'كلمة المرور', clearDay: 'مسح اليوم',
-    workingDays: 'الثلاثاء - الأحد (10:00 - 22:00)', fifteenMinRule: 'ملاحظة: 15 دقيقة كحد أقصى للوصول.',
+    workingDays: 'الثلاثاء - الأحد (10:00 - 22:00)', tenMinRule: 'ملاحظة: 15 دقيقة كحد أقصى للوصول.',
     done: 'تم', delete: 'حذف', noBookings: 'لا يوجد حجوزات', clientsBefore: 'عملاء قبلك', logout: 'تسجيل الخروج',
     notifications: 'الإشعارات',
     liveSchedule: 'الجدول المباشر',
@@ -1479,8 +1479,55 @@ function BarberShop() {
           <div className="w-12 h-12 bg-gold-500/10 rounded-2xl flex items-center justify-center border border-gold-500/20">
             <AlertCircle className="text-gold-400" size={24} />
           </div>
-          <p className="text-sm sm:text-base text-gold-100/80 font-medium leading-tight">{t.fifteenMinRule}</p>
+          <p className="text-sm sm:text-base text-gold-100/80 font-medium leading-tight">{t.tenMinRule}</p>
         </motion.div>
+
+        {!isStandalone && (
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.35 }}
+            className="mb-12 p-6 bg-white/5 border border-white/10 rounded-[2rem] flex flex-col gap-6 shadow-2xl"
+          >
+            <div className="flex items-center gap-5">
+              <div className="w-14 h-14 bg-gold-500/10 rounded-2xl flex items-center justify-center border border-gold-500/20">
+                <Download className="text-gold-500" size={28} />
+              </div>
+              <div>
+                <h3 className="text-lg font-black uppercase tracking-widest text-gold-500 leading-none mb-1">{t.installApp}</h3>
+                <p className="text-[10px] text-white/40 uppercase tracking-[0.2em] font-bold">{t.installInstructions}</p>
+              </div>
+            </div>
+            
+            <div className="grid gap-4">
+              <div className={cn(
+                "p-4 rounded-2xl border transition-all",
+                isIOS ? "bg-gold-500/10 border-gold-500/30" : "bg-white/5 border-white/5 opacity-60"
+              )}>
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="w-6 h-6 rounded-full bg-gold-500 flex items-center justify-center text-black text-[10px] font-black">1</div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-gold-500">iPhone / Safari</p>
+                </div>
+                <p className="text-xs text-white/80 leading-relaxed font-medium">
+                  {t.iosInstall}
+                </p>
+              </div>
+
+              <div className={cn(
+                "p-4 rounded-2xl border transition-all",
+                !isIOS ? "bg-gold-500/10 border-gold-500/30" : "bg-white/5 border-white/5 opacity-60"
+              )}>
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center text-white text-[10px] font-black">2</div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-white/40">Android / Chrome</p>
+                </div>
+                <p className="text-xs text-white/60 leading-relaxed">
+                  {t.androidInstall}
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        )}
 
         {/* Shop Main Booking */}
         {shopMain && (
