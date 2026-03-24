@@ -158,7 +158,7 @@ const TRANSLATIONS = {
     available: 'Available', working: 'Working', unavailable: 'Unavailable',
     bookNow: 'Book Now', clientName: 'Your Name', pickTime: 'Pick Time', pickDate: 'Pick Date', confirm: 'Confirm Booking', cancel: 'Cancel',
     admin: 'Admin', manager: 'Manager', worker: 'Worker', login: 'Login', password: 'Password', clearDay: 'Clear Day',
-    workingDays: 'Tuesday - Sunday (10:00 - 22:00)', tenMinRule: 'Note: Max 10 mins late or booking missed.',
+    workingDays: 'Tuesday - Sunday (10:00 - 22:00)', fifteenMinRule: 'Note: Max 15 mins late or booking missed.',
     done: 'Done', delete: 'Delete', noBookings: 'No bookings', clientsBefore: 'Clients before you', logout: 'Logout',
     notifications: 'Notifications',
     liveSchedule: 'Live Schedule',
@@ -193,7 +193,7 @@ const TRANSLATIONS = {
     available: 'Disponible', working: 'En cours', unavailable: 'Indisponible',
     bookNow: 'Réserver', clientName: 'Votre Nom', pickTime: 'Choisir l\'heure', pickDate: 'Choisir la date', confirm: 'Confirmer', cancel: 'Annuler',
     admin: 'Admin', manager: 'Gérant', worker: 'Coiffeur', login: 'Connexion', password: 'Mot de passe', clearDay: 'Effacer',
-    workingDays: 'Mardi - Dimanche (10:00 - 22:00)', tenMinRule: 'Note: Max 10 min de retard ou annulé.',
+    workingDays: 'Mardi - Dimanche (10:00 - 22:00)', fifteenMinRule: 'Note: Max 15 min de retard ou annulé.',
     done: 'Terminé', delete: 'Supprimer', noBookings: 'Aucune réservation', clientsBefore: 'Clients avant vous', logout: 'Déconnexion',
     notifications: 'Notifications',
     liveSchedule: 'Planning en direct',
@@ -228,7 +228,7 @@ const TRANSLATIONS = {
     available: 'متاح', working: 'يعمل', unavailable: 'غير متاح',
     bookNow: 'احجز الآن', clientName: 'اسمك', pickTime: 'اختر الوقت', pickDate: 'اختر التاريخ', confirm: 'تأكيد الحجز', cancel: 'إلغاء',
     admin: 'مسؤول', manager: 'مدير', worker: 'حلاق', login: 'تسجيل الدخول', password: 'كلمة المرور', clearDay: 'مسح اليوم',
-    workingDays: 'الثلاثاء - الأحد (10:00 - 22:00)', tenMinRule: 'ملاحظة: 10 دقائق كحد أقصى للوصول.',
+    workingDays: 'الثلاثاء - الأحد (10:00 - 22:00)', fifteenMinRule: 'ملاحظة: 15 دقيقة كحد أقصى للوصول.',
     done: 'تم', delete: 'حذف', noBookings: 'لا يوجد حجوزات', clientsBefore: 'عملاء قبلك', logout: 'تسجيل الخروج',
     notifications: 'الإشعارات',
     liveSchedule: 'الجدول المباشر',
@@ -669,7 +669,7 @@ function BarberShop() {
         if (b.status === 'pending') {
           try {
             const bTime = parseISO(`${b.date}T${b.time}`);
-            if (isAfter(now, addMinutes(bTime, 10))) {
+            if (isAfter(now, addMinutes(bTime, 15))) {
               await updateDoc(doc(db, 'bookings', b.id), { status: 'missed' })
                 .catch(e => handleFirestoreError(e, OperationType.UPDATE, `bookings/${b.id}`));
             }
@@ -1479,7 +1479,7 @@ function BarberShop() {
           <div className="w-12 h-12 bg-gold-500/10 rounded-2xl flex items-center justify-center border border-gold-500/20">
             <AlertCircle className="text-gold-400" size={24} />
           </div>
-          <p className="text-sm sm:text-base text-gold-100/80 font-medium leading-tight">{t.tenMinRule}</p>
+          <p className="text-sm sm:text-base text-gold-100/80 font-medium leading-tight">{t.fifteenMinRule}</p>
         </motion.div>
 
         {/* Shop Main Booking */}

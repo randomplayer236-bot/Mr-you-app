@@ -62,10 +62,17 @@
       </div>
     </div>
     <script>
+      console.log('index.html served');
       // Immediate error catching
       window.onerror = function(msg, url, line, col, error) {
-        document.getElementById('debug-info').innerHTML = 'Error: ' + msg + ' at ' + line + ':' + col;
-        document.getElementById('debug-info').style.color = '#ff4444';
+        const debugInfo = document.getElementById('debug-info');
+        if (debugInfo) {
+          debugInfo.innerHTML = '<div style="color: #ff4444; margin-top: 20px; text-align: left; background: #111; padding: 15px; border-radius: 8px; border: 1px solid #333; font-family: monospace; font-size: 11px; max-width: 90vw; overflow-x: auto;">' +
+            '<strong>CRITICAL ERROR:</strong><br/>' + msg + '<br/><br/>' +
+            '<strong>Location:</strong> ' + url + ':' + line + ':' + col + '<br/><br/>' +
+            (error && error.stack ? '<strong>Stack:</strong><br/>' + error.stack.replace(/\n/g, '<br/>') : '') +
+            '</div>';
+        }
         return false;
       };
     </script>
