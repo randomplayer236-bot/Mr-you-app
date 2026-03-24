@@ -405,6 +405,27 @@ const DigitalClock = ({ offset = 0 }: { offset?: number }) => {
 };
 
 function BarberShop() {
+  const [initError, setInitError] = useState<string | null>(null);
+  
+  try {
+    console.log("BarberShop component rendering...");
+  useEffect(() => {
+    // Test Firestore connection
+    const testConnection = async () => {
+      try {
+        const { getDocFromServer } = await import('firebase/firestore');
+        await getDocFromServer(doc(db, 'settings', 'global'));
+        console.log("Firestore connection successful!");
+      } catch (error) {
+        console.error("Firestore connection test failed:", error);
+        if (error instanceof Error && error.message.includes('the client is offline')) {
+          setAlertModal("Firebase configuration error: The client is offline or the configuration is invalid. Please check your Netlify environment variables.");
+        }
+      }
+    };
+    testConnection();
+  }, []);
+
   const [lang, setLang] = useState<'en' | 'fr' | 'ar'>('fr');
   const [userRole, setUserRole] = useState<Role>('client');
   const [workerId, setWorkerId] = useState<string | null>(null);
@@ -2235,6 +2256,28 @@ function BarberShop() {
       </AnimatePresence>
     </div>
   );
+  } catch (e) {
+    console.error("BarberShop initialization error:", e);
+    return (
+      <div className="min-h-screen bg-black text-white flex items-center justify-center p-8 text-center font-sans">
+        <div className="max-w-md">
+          <h1 className="text-gold-500 text-3xl font-black uppercase tracking-widest mb-4">Initialization Error</h1>
+          <p className="text-white/60 mb-8 leading-relaxed">
+            The application failed to start. This is usually caused by a missing or invalid Firebase configuration.
+          </p>
+          <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-2xl text-red-400 text-xs font-mono text-left overflow-auto max-h-40 mb-8">
+            {e instanceof Error ? e.message : String(e)}
+          </div>
+          <button 
+            onClick={() => window.location.reload()}
+            className="px-8 py-4 bg-gold-500 text-black rounded-2xl font-black uppercase tracking-widest text-xs shadow-2xl shadow-gold-500/20"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 }
 
 export default function App() { 

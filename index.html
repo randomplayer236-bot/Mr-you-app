@@ -62,18 +62,26 @@
       </div>
     </div>
     <script>
-      console.log('index.html served');
       // Immediate error catching
       window.onerror = function(msg, url, line, col, error) {
         const debugInfo = document.getElementById('debug-info');
         if (debugInfo) {
-          debugInfo.innerHTML = '<div style="color: #ff4444; margin-top: 20px; text-align: left; background: #111; padding: 15px; border-radius: 8px; border: 1px solid #333; font-family: monospace; font-size: 11px; max-width: 90vw; overflow-x: auto;">' +
-            '<strong>CRITICAL ERROR:</strong><br/>' + msg + '<br/><br/>' +
-            '<strong>Location:</strong> ' + url + ':' + line + ':' + col + '<br/><br/>' +
-            (error && error.stack ? '<strong>Stack:</strong><br/>' + error.stack.replace(/\n/g, '<br/>') : '') +
-            '</div>';
+          debugInfo.innerHTML = 'Error: ' + msg + '<br/><small>' + url + ' at ' + line + ':' + col + '</small>';
+          debugInfo.style.color = '#ff4444';
+          debugInfo.style.background = 'rgba(255,0,0,0.1)';
+          debugInfo.style.padding = '10px';
+          debugInfo.style.borderRadius = '5px';
         }
         return false;
+      };
+      
+      // Catch unhandled promise rejections (like Firebase initialization errors)
+      window.onunhandledrejection = function(event) {
+        const debugInfo = document.getElementById('debug-info');
+        if (debugInfo) {
+          debugInfo.innerHTML = 'Unhandled Rejection: ' + event.reason;
+          debugInfo.style.color = '#ff4444';
+        }
       };
     </script>
     <script type="module" src="/src/main.tsx"></script>
