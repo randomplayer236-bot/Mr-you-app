@@ -51,7 +51,13 @@ import {
   writeBatch
 } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
-import { db, auth } from './firebase';
+import { 
+  ref, 
+  uploadBytes, 
+  getDownloadURL, 
+  deleteObject 
+} from 'firebase/storage';
+import { db, auth, storage } from './firebase';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -447,7 +453,7 @@ function BarberShop() {
     lastCleanupDate: '',
     timeOffset: 0
   });
-  const [stagedImages, setStagedImages] = useState<{ id: string, data: string, storagePath?: string, type: 'file' | 'url', folder: string, name: string }[]>([]);
+  const [stagedImages, setStagedImages] = useState<{ id: string, data: string, file?: File, storagePath?: string, type: 'file' | 'url', folder: string, name: string }[]>([]);
 
   const convertToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -471,7 +477,7 @@ function BarberShop() {
     } else {
       // File input
       if (file.size > 800 * 1024) {
-        setAlertModal('File too large! Please keep images under 800KB for Firestore storage.');
+        setAlertModal('File too large! Please keep images under 800KB.');
         return;
       }
       try {
@@ -479,6 +485,7 @@ function BarberShop() {
         setStagedImages(prev => [...prev, { 
           id: Math.random().toString(36).substr(2, 9), 
           data: base64, 
+          file,
           type: 'file', 
           folder,
           name: file.name
@@ -496,13 +503,30 @@ function BarberShop() {
       const batch = writeBatch(db);
       
       for (const img of stagedImages) {
+        let finalUrl = img.data;
+        let storagePath = img.storagePath;
+
+        // If it's a file, upload it to Firebase Storage first
+        if (img.type === 'file' && img.file) {
+          try {
+            const path = `${img.folder}/${Date.now()}_${img.file.name}`;
+            const storageRef = ref(storage, path);
+            const snapshot = await uploadBytes(storageRef, img.file);
+            finalUrl = await getDownloadURL(snapshot.ref);
+            storagePath = path;
+          } catch (uploadErr) {
+            console.error('Upload error, falling back to base64:', uploadErr);
+            // Fallback to base64 if upload fails
+          }
+        }
+
         if (img.folder === 'logos') {
-          batch.update(doc(db, 'settings', 'global'), { logoUrl: img.data });
+          batch.update(doc(db, 'settings', 'global'), { logoUrl: finalUrl });
         } else if (img.folder === 'vip_photos') {
-          batch.update(doc(db, 'settings', 'global'), { vipPhotoUrl: img.data });
+          batch.update(doc(db, 'settings', 'global'), { vipPhotoUrl: finalUrl });
         } else if (img.folder.startsWith('barber_photos_')) {
           const id = img.folder.split('_').pop() || '';
-          batch.update(doc(db, 'barbers', id), { photoUrl: img.data });
+          batch.update(doc(db, 'barbers', id), { photoUrl: finalUrl });
         }
       }
       
@@ -518,11 +542,12 @@ function BarberShop() {
   const removeStaged = async (id: string) => {
     const img = stagedImages.find(i => i.id === id);
     if (img?.storagePath) {
-      await fetch('/server-api/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ storagePath: img.storagePath }),
-      }).catch(e => console.error('Storage delete failed:', e));
+      try {
+        const storageRef = ref(storage, img.storagePath);
+        await deleteObject(storageRef);
+      } catch (e) {
+        console.error('Storage delete failed:', e);
+      }
     }
     setStagedImages(prev => prev.filter(img => img.id !== id));
   };
